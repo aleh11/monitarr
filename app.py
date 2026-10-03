@@ -708,6 +708,16 @@ async def image(item_id: str, user=Depends(current_user)):
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return FileResponse(STATIC / "favicon-32.png", media_type="image/png")
+
+
+@app.get("/apple-touch-icon.png", include_in_schema=False)
+async def apple_touch_icon():
+    return FileResponse(STATIC / "apple-touch-icon.png", media_type="image/png")
+
+
 @app.get("/")
 async def index():
     return FileResponse(STATIC / "index.html")
