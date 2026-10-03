@@ -57,7 +57,7 @@ function switchTab(name) {
   clearInterval(timer);
   const load = loaders[name];
   load();
-  const every = { now: 10000, system: 15000, board: 60000, history: 60000 }[name];
+  const every = { now: 10000, system: 15000, board: 60000, history: 60000, watch: 60000 }[name];
   if (every) timer = setInterval(load, every);
 }
 
@@ -86,18 +86,57 @@ const loaders = {
       : `<div class="empty">Nothing finished since tracking started.</div>`;
   },
 
+  async watch() {
+    const [up, wl, latest] = await Promise.all([api("/api/up-next"), api("/api/watchlist"), api("/api/latest")]);
+    watchCache = wl;
+    $("#up-next").innerHTML = up.length ? up.map((it) => `<div class="poster">
+      <img src="${poster(it)}" alt="" loading="lazy"><div class="cap">${esc(it.series_name || it.item_name)}
+      ${it.series_name ? `<div class="muted">${esc(ep(it))}</div>` : ""}</div>
+      ${it.resume_pct ? `<div class="resume"><i style="width:${it.resume_pct}%"></i></div>` : ""}</div>`).join("")
+      : `<div class="empty" style="grid-column:1/-1">Nothing in progress. Pick something below.</div>`;
+    const card = (it) => {
+      const mine = it.in.includes(me.name);
+      return `<div class="card wl-item"><img src="${img(it.item_id)}" alt="" loading="lazy"><div class="body">
+        <div class="title">${esc(it.item_name)}${it.year ? ` <span class="muted">(${it.year})</span>` : ""}
+          <span class="tag">${it.item_type === "Series" ? "Show" : "Movie"}</span>${it.missing ? '<span class="tag bad">not in library</span>' : ""}</div>
+        <div class="muted small">added by <span class="user">${esc(it.added_by_name)}</span> · ${ago(it.added_at)}</div>
+        ${it.note ? `<div class="wl-note">“${esc(it.note)}”</div>` : ""}
+        <div class="wl-progress">${Object.entries(it.progress).map(([u, p]) => {
+          const on = it.in.includes(u);
+          const txt = p.total != null ? `${p.watched}/${p.total}` : p.done ? "✓" : "–";
+          return `<span class="tag ${p.done ? "good" : ""}" title="${on ? "in" : "not in"}">${on ? "★ " : ""}${esc(u)} ${txt}</span>`;
+        }).join("")}</div>
+        <div class="wl-actions">
+          ${mine ? `<button class="ghost" data-wl-out="${it.item_id}">I'm out</button>` : `<button data-wl-in="${it.item_id}">I'm in</button>`}
+          ${it.can_remove ? `<button class="ghost danger" data-wl-remove="${it.item_id}">Remove</button>` : ""}
+        </div></div></div>`;
+    };
+    const open = wl.filter((i) => !i.done), done = wl.filter((i) => i.done);
+    $("#watchlist").innerHTML = open.length ? open.map(card).join("") : `<div class="empty">The watchlist is empty. Search above or add something fresh below.</div>`;
+    $("#wl-done-wrap").hidden = !done.length;
+    $("#wl-done-count").textContent = done.length;
+    $("#wl-done").innerHTML = done.map(card).join("");
+    $("#latest").innerHTML = latest.map((it) => `<button class="poster" ${it.listed ? "disabled" : `data-wl-add="${it.series_id || it.item_id}"`}>
+      <img src="${poster(it)}" alt="" loading="lazy"><span class="badge">${it.listed ? "listed" : "+ add"}</span>
+      <div class="cap">${esc(it.series_name || it.item_name)}${it.year && !it.series_name ? ` <span class="muted">(${it.year})</span>` : ""}</div></button>`).join("");
+  },
+
   async board() {
     const b = await api("/api/leaderboard");
     $("#board-since").textContent = b.since ? `· since ${new Date(b.since).toLocaleString()}` : "";
+    const st0 = b.badges.stats;
     const render = (rows) => {
       if (!rows.length) return `<div class="empty">No finished watches yet.</div>`;
       const max = rows[0].seconds || 1;
       return rows.map((r, i) => `<div class="rank ${i === 0 ? "first" : ""}">
         <span class="pos">${i + 1}</span>
-        <div><div class="user">${esc(r.user_name)}</div><div class="muted small">${r.movies} movies · ${r.episodes} episodes</div></div>
+        <div><div class="user">${esc(r.user_name)}</div><div class="muted small">${r.movies} movies · ${r.episodes} episodes${
+          st0[r.user_name]?.streak > 1 ? ` · <span class="streak">🔥 ${st0[r.user_name].streak}-day streak</span>` : ""}</div></div>
         <span class="hours">${hours(r.seconds)}h</span>
         <div class="progress bar"><i style="width:${(100 * r.seconds) / max}%"></i></div></div>`).join("");
     };
+    $("#awards").innerHTML = b.badges.awards.map((a) => `<div class="award"><div class="t">${esc(a.title)}</div>
+      <div><span class="user">${esc(a.user)}</span> · ${a.value}</div><div class="w">${esc(a.why)}</div></div>`).join("");
     $("#board-all").innerHTML = render(b.all_time);
     $("#board-week").innerHTML = render(b.week);
     $("#top-shows").innerHTML = b.top_shows.length ? b.top_shows.map((s) => `
@@ -106,7 +145,12 @@ const loaders = {
   },
 
   async ratings() {
-    const [toRate, ratings] = await Promise.all([api("/api/to-rate"), api("/api/ratings")]);
+    const [toRate, ratings, taste] = await Promise.all([api("/api/to-rate"), api("/api/ratings"), api("/api/taste")]);
+    $("#taste").innerHTML = taste.length ? `<h2>Taste match</h2><div class="taste">${taste.map((p) => `
+      <div class="card"><span class="match">${p.match}%</span>
+        <span class="user"> ${esc(p.a)} × ${esc(p.b)}</span> <span class="muted small">over ${p.shared} shared rating${p.shared > 1 ? "s" : ""}</span>
+        ${p.fights.map((f) => `<div class="fight">⚔️ ${esc(f.item)}: <span class="user">${esc(p.a)}</span> ${f.a_score} vs <span class="user">${esc(p.b)}</span> ${f.b_score}</div>`).join("")}
+      </div>`).join("")}</div>` : "";
     ratingsCache = ratings;
     $("#to-rate").innerHTML = toRate.length ? toRate.map(posterCard).join("")
       : `<div class="empty" style="grid-column:1/-1">You're all caught up. Search below to rate anything else.</div>`;
@@ -217,6 +261,70 @@ $("#rate-delete").addEventListener("click", async () => {
   await api(`/api/ratings/${rateState.target}`, { method: "DELETE" });
   $("#rate-dialog").close(); loaders.ratings();
 });
+
+// ---------------------------------------------------------------- to-watch
+let watchCache = [];
+document.addEventListener("click", async (e) => {
+  const t = e.target.closest("[data-wl-add],[data-wl-in],[data-wl-out],[data-wl-remove]");
+  if (!t) return;
+  t.disabled = true;
+  const d = t.dataset;
+  if (d.wlAdd) {
+    await api("/api/watchlist", { method: "POST", body: JSON.stringify({ item_id: d.wlAdd, note: $("#wl-note").value }) });
+    $("#wl-note").value = ""; $("#wl-search").value = ""; $("#wl-results").innerHTML = "";
+  } else if (d.wlIn) await api(`/api/watchlist/${d.wlIn}/in`, { method: "POST" });
+  else if (d.wlOut) await api(`/api/watchlist/${d.wlOut}/in`, { method: "DELETE" });
+  else if (d.wlRemove) await api(`/api/watchlist/${d.wlRemove}`, { method: "DELETE" });
+  loaders.watch();
+});
+
+let wlT = null;
+$("#wl-search").addEventListener("input", (e) => {
+  clearTimeout(wlT);
+  const q = e.target.value.trim();
+  if (q.length < 2) { $("#wl-results").innerHTML = ""; return; }
+  wlT = setTimeout(async () => {
+    const res = (await api(`/api/search?q=${encodeURIComponent(q)}`)).filter((it) => it.item_type !== "Episode");
+    $("#wl-results").innerHTML = res.length ? res.map((it) => `<button class="poster" data-wl-add="${it.item_id}">
+      <img src="${img(it.item_id)}" alt="" loading="lazy"><span class="badge">+ add</span>
+      <div class="cap">${esc(it.item_name)}${it.year ? ` <span class="muted">(${it.year})</span>` : ""}</div></button>`).join("")
+      : `<div class="muted small">No matches in the library.</div>`;
+  }, 250);
+});
+
+// Pick for us: weighted by how many people are in, then a little drumroll
+function pickOne(pool) {
+  let r = Math.random() * pool.reduce((n, i) => n + Math.max(1, i.in.length), 0);
+  for (const i of pool) { r -= Math.max(1, i.in.length); if (r <= 0) return i; }
+  return pool[pool.length - 1];
+}
+async function rollPick() {
+  const pool = watchCache.filter((i) => !i.done && !i.missing);
+  const dlg = $("#pick-dialog");
+  if (!pool.length) {
+    $("#pick-label").textContent = "Nothing to pick from";
+    $("#pick-title").textContent = "Add something to the watchlist first";
+    $("#pick-img").removeAttribute("src"); $("#pick-who").textContent = "";
+    return dlg.open || dlg.showModal();
+  }
+  dlg.open || dlg.showModal();
+  $("#pick-label").textContent = "Rolling…";
+  $("#pick-who").textContent = "";
+  for (let k = 0; k < 14; k++) {
+    const it = pool[Math.floor(Math.random() * pool.length)];
+    $("#pick-title").textContent = it.item_name;
+    $("#pick-img").src = img(it.item_id);
+    await new Promise((res) => setTimeout(res, 60 + k * 12));
+  }
+  const win = pickOne(pool);
+  $("#pick-label").textContent = "Tonight you're watching";
+  $("#pick-title").textContent = `${win.item_name}${win.year ? ` (${win.year})` : ""}`;
+  $("#pick-img").src = img(win.item_id);
+  $("#pick-who").textContent = win.in.length ? `${win.in.join(" & ")} ${win.in.length > 1 ? "are" : "is"} in` : "";
+}
+$("#pick").addEventListener("click", rollPick);
+$("#pick-again").addEventListener("click", rollPick);
+$("#pick-close").addEventListener("click", () => $("#pick-dialog").close());
 
 let searchT = null;
 $("#search").addEventListener("input", (e) => {

@@ -67,6 +67,11 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, user_name TEXT,
             item_id TEXT, item_type TEXT, item_name TEXT, series_name TEXT,
             series_id TEXT, runtime_s INTEGER, at TEXT);
+        CREATE TABLE IF NOT EXISTS watchlist (
+            item_id TEXT PRIMARY KEY, item_type TEXT, item_name TEXT, year INTEGER,
+            added_by_id TEXT, added_by_name TEXT, note TEXT, added_at TEXT);
+        CREATE TABLE IF NOT EXISTS watchlist_votes (
+            item_id TEXT, user_id TEXT, user_name TEXT, PRIMARY KEY (item_id, user_id));
         CREATE TABLE IF NOT EXISTS disk_samples (ts INTEGER, label TEXT, used INTEGER, total INTEGER);
         CREATE INDEX IF NOT EXISTS idx_completions_at ON completions(at);
         CREATE INDEX IF NOT EXISTS idx_disk ON disk_samples(label, ts);
@@ -332,7 +337,7 @@ async def leaderboard(user=Depends(current_user)):
         recent = [dict(r) for r in c.execute("SELECT * FROM completions ORDER BY id DESC LIMIT 30")]
         since = c.execute("SELECT MIN(since) FROM tracked_users").fetchone()[0]
     return {"since": since, "all_time": board(), "week": board("WHERE at >= ?", (week_ago,)),
-            "top_shows": top_shows, "recent": recent}
+            "top_shows": top_shows, "recent": recent, "badges": badges()}
 
 
 # ----------------------------------------------------------------- ratings
@@ -417,6 +422,212 @@ async def unrate(item_id: str, user=Depends(current_user)):
     with db() as c:
         c.execute("DELETE FROM ratings WHERE user_id=? AND item_id=?", (user["id"], norm_id(item_id)))
     return {"ok": True}
+
+
+# ---------------------------------------------------------------- to-watch
+CARD_FIELDS = "SeriesName,SeriesId,ProductionYear,RunTimeTicks"
+
+
+@app.get("/api/up-next")
+async def up_next(user=Depends(current_user)):
+    """The caller's in-progress items and next episodes, Jellyfin's own picks."""
+    resume, nxt = await asyncio.gather(
+        jf.get("/UserItems/Resume", params={"userId": user["id"], "Limit": 12, "MediaTypes": "Video",
+                                            "Fields": CARD_FIELDS, "EnableUserData": "true"}),
+        jf.get("/Shows/NextUp", params={"userId": user["id"], "Limit": 12, "Fields": CARD_FIELDS}))
+    out, seen = [], set()
+    for it in resume.json().get("Items", []) + nxt.json().get("Items", []):
+        info = item_info(it)
+        key = info["series_id"] or info["item_id"]  # one card per show
+        if key in seen:
+            continue
+        seen.add(key)
+        ud = it.get("UserData") or {}
+        info["resume_pct"] = round(ud.get("PlayedPercentage") or 0) or None
+        out.append(info)
+    return out[:12]
+
+
+@app.get("/api/watchlist")
+async def watchlist(user=Depends(current_user)):
+    with db() as c:
+        items = [dict(r) for r in c.execute("SELECT * FROM watchlist ORDER BY added_at DESC")]
+        votes = [dict(r) for r in c.execute("SELECT * FROM watchlist_votes")]
+    if not items:
+        return []
+    ids = ",".join(i["item_id"] for i in items)
+    users = await jf_users()
+
+    async def progress_for(u):
+        r = await jf.get(f"/Users/{u['Id']}/Items", params={"Ids": ids, "Fields": "RecursiveItemCount",
+                                                            "EnableUserData": "true"})
+        out = {}
+        for it in r.json().get("Items", []):
+            ud = it.get("UserData") or {}
+            if it["Type"] == "Series":
+                total = it.get("RecursiveItemCount") or 0
+                watched = total - (ud.get("UnplayedItemCount") or 0)
+                out[norm_id(it["Id"])] = {"watched": max(0, watched), "total": total,
+                                          "done": total > 0 and watched >= total}
+            else:
+                out[norm_id(it["Id"])] = {"done": bool(ud.get("Played"))}
+        return u["Name"], out
+
+    per_user = dict(await asyncio.gather(*(progress_for(u) for u in users)))
+    for it in items:
+        it["in"] = [v["user_name"] for v in votes if v["item_id"] == it["item_id"]]
+        it["progress"] = {name: p[it["item_id"]] for name, p in per_user.items() if it["item_id"] in p}
+        it["missing"] = not it["progress"]  # removed from the library since it was added
+        it["done"] = bool(it["in"]) and all(it["progress"].get(n, {}).get("done") for n in it["in"])
+        it["can_remove"] = user["admin"] or it["added_by_id"] == user["id"]
+    # unfinished first, then most people in; rows arrive newest-first and sort is stable
+    items.sort(key=lambda i: (i["done"], -len(i["in"])))
+    return items
+
+
+class WatchAdd(BaseModel):
+    item_id: str = Field(pattern=r"^[0-9a-fA-F-]{32,36}$")
+    note: str = Field(default="", max_length=200)
+
+
+@app.post("/api/watchlist")
+async def watchlist_add(body: WatchAdd, user=Depends(current_user)):
+    r = await jf.get("/Items", params={"Ids": body.item_id, "Fields": "SeriesId,ProductionYear"})
+    found = r.json().get("Items") if r.status_code == 200 else None
+    if not found:
+        raise HTTPException(404, "Item not found in Jellyfin")
+    it = found[0]
+    if it["Type"] == "Episode" and it.get("SeriesId"):  # an episode means the show
+        r = await jf.get("/Items", params={"Ids": it["SeriesId"], "Fields": "ProductionYear"})
+        it = r.json()["Items"][0]
+    if it["Type"] not in ("Movie", "Series"):
+        raise HTTPException(400, "Only movies and shows can go on the watchlist")
+    iid = norm_id(it["Id"])
+    with db() as c:
+        c.execute("INSERT OR IGNORE INTO watchlist VALUES (?,?,?,?,?,?,?,?)",
+                  (iid, it["Type"], it["Name"], it.get("ProductionYear"), user["id"], user["name"],
+                   body.note.strip(), now_iso()))
+        c.execute("INSERT OR IGNORE INTO watchlist_votes VALUES (?,?,?)", (iid, user["id"], user["name"]))
+    return {"ok": True, "item_id": iid}
+
+
+@app.post("/api/watchlist/{item_id}/in")
+async def watchlist_in(item_id: str, user=Depends(current_user)):
+    with db() as c:
+        if not c.execute("SELECT 1 FROM watchlist WHERE item_id=?", (norm_id(item_id),)).fetchone():
+            raise HTTPException(404)
+        c.execute("INSERT OR IGNORE INTO watchlist_votes VALUES (?,?,?)", (norm_id(item_id), user["id"], user["name"]))
+    return {"ok": True}
+
+
+@app.delete("/api/watchlist/{item_id}/in")
+async def watchlist_out(item_id: str, user=Depends(current_user)):
+    with db() as c:
+        c.execute("DELETE FROM watchlist_votes WHERE item_id=? AND user_id=?", (norm_id(item_id), user["id"]))
+    return {"ok": True}
+
+
+@app.delete("/api/watchlist/{item_id}")
+async def watchlist_remove(item_id: str, user=Depends(current_user)):
+    iid = norm_id(item_id)
+    with db() as c:
+        row = c.execute("SELECT added_by_id FROM watchlist WHERE item_id=?", (iid,)).fetchone()
+        if not row:
+            raise HTTPException(404)
+        if not user["admin"] and row["added_by_id"] != user["id"]:
+            raise HTTPException(403, "Only whoever added it (or an admin) can remove it")
+        c.execute("DELETE FROM watchlist WHERE item_id=?", (iid,))
+        c.execute("DELETE FROM watchlist_votes WHERE item_id=?", (iid,))
+    return {"ok": True}
+
+
+@app.get("/api/latest")
+async def latest(user=Depends(current_user)):
+    """Recently added to the library, grouped by show, flagged if already listed."""
+    r = await jf.get("/Items/Latest", params={"userId": user["id"], "Limit": 16,
+                                              "IncludeItemTypes": "Movie,Episode", "Fields": CARD_FIELDS})
+    with db() as c:
+        listed = {row[0] for row in c.execute("SELECT item_id FROM watchlist")}
+    out = []
+    for it in r.json():
+        info = item_info(it)
+        info["listed"] = (info["series_id"] or info["item_id"]) in listed
+        out.append(info)
+    return out
+
+
+# ------------------------------------------------------------------- taste
+@app.get("/api/taste")
+async def taste(user=Depends(current_user)):
+    """How alike each pair of users rates, plus their biggest disagreements."""
+    with db() as c:
+        rows = [dict(r) for r in c.execute("SELECT user_id, user_name, item_id, item_name, series_name, "
+                                           "item_type, score FROM ratings")]
+    by_item = {}
+    for r in rows:
+        by_item.setdefault(r["item_id"], []).append(r)
+    names = {r["user_id"]: r["user_name"] for r in rows}
+    ids = sorted(names)
+    pairs = []
+    for i, a in enumerate(ids):
+        for b in ids[i + 1:]:
+            shared = []
+            for item_rows in by_item.values():
+                ra = next((x for x in item_rows if x["user_id"] == a), None)
+                rb = next((x for x in item_rows if x["user_id"] == b), None)
+                if ra and rb:
+                    shared.append((ra, rb))
+            if not shared:
+                continue
+            diff = sum(abs(ra["score"] - rb["score"]) for ra, rb in shared) / len(shared)
+            fights = sorted(shared, key=lambda p: abs(p[0]["score"] - p[1]["score"]), reverse=True)
+            pairs.append({
+                "a": names[a], "b": names[b], "shared": len(shared),
+                "match": round(100 - diff * 100 / 9),
+                "fights": [{"item": f"{ra['series_name']} · {ra['item_name']}" if ra["item_type"] == "Episode" else ra["item_name"],
+                            "a_score": ra["score"], "b_score": rb["score"]}
+                           for ra, rb in fights[:3] if ra["score"] != rb["score"]],
+            })
+    return pairs
+
+
+# ------------------------------------------------------------------ badges
+def badges():
+    """Streaks and fun titles from finished watches (local time)."""
+    with db() as c:
+        rows = [dict(r) for r in c.execute("SELECT user_name, item_type, runtime_s, at FROM completions")]
+    per = {}
+    for r in rows:
+        t = datetime.fromisoformat(r["at"]).astimezone()
+        p = per.setdefault(r["user_name"], {"days": {}, "night": 0, "movies": 0})
+        p["days"][t.date()] = p["days"].get(t.date(), 0) + (r["item_type"] == "Episode")
+        p["night"] += 0 <= t.hour < 5
+        p["movies"] += r["item_type"] == "Movie"
+    today = datetime.now().astimezone().date()
+    stats = {}
+    for name, p in per.items():
+        days = sorted(p["days"])
+        best = cur = run = 0
+        prev = None
+        for d in days:
+            run = run + 1 if prev and (d - prev).days == 1 else 1
+            best = max(best, run)
+            prev = d
+        # a streak is still alive if the last watch was today or yesterday
+        cur = run if prev and (today - prev).days <= 1 else 0
+        stats[name] = {"streak": cur, "best_streak": best, "binge": max(p["days"].values(), default=0),
+                       "night": p["night"], "movies": p["movies"]}
+    titles = [("binge", "Binge Lord", "most episodes in one day"),
+              ("night", "Night Owl", "most watches between midnight and 5am"),
+              ("movies", "Cinephile", "most movies finished"),
+              ("best_streak", "Streaker", "longest daily watch streak")]
+    awards = []
+    for key, title, why in titles:
+        best = max((v[key] for v in stats.values()), default=0)
+        if best > 0:  # ties share the title
+            winners = [n for n, v in stats.items() if v[key] == best]
+            awards.append({"user": " & ".join(winners), "title": title, "why": why, "value": best})
+    return {"stats": stats, "awards": awards}
 
 
 # ----------------------------------------------------------------- history
