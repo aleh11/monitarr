@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Monitor</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div id="login" class="login" hidden>
+  <form id="login-form" class="login-card">
+    <h1>Monitor</h1>
+    <p class="muted">Log in with your Jellyfin account</p>
+    <input name="username" placeholder="Username" autocomplete="username" required>
+    <input name="password" type="password" placeholder="Password" autocomplete="current-password">
+    <button type="submit">Log in</button>
+    <p id="login-error" class="error" hidden></p>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header class="top">
+    <span class="brand">Monitor</span>
+    <nav id="tabs">
+      <button data-tab="now" class="active">Now</button>
+      <button data-tab="board">Leaderboard</button>
+      <button data-tab="ratings">Ratings</button>
+      <button data-tab="history">History</button>
+      <button data-tab="system">System</button>
+    </nav>
+    <span class="who"><span id="me"></span> · <a href="#" id="logout">log out</a></span>
+  </header>
+
+  <main>
+    <section id="tab-now" class="tab">
+      <h2>Playing now</h2>
+      <div id="now" class="now-list"></div>
+      <h2>Finished recently</h2>
+      <div id="recent" class="feed"></div>
+    </section>
+
+    <section id="tab-board" class="tab" hidden>
+      <h2>Watch hours <span id="board-since" class="muted small"></span></h2>
+      <p class="muted small">Every finished movie or episode credits its full runtime. Rewatches count.</p>
+      <div class="board-cols">
+        <div><h3>All time</h3><div id="board-all"></div></div>
+        <div><h3>Last 7 days</h3><div id="board-week"></div></div>
+      </div>
+      <h3>Most-watched shows</h3>
+      <div id="top-shows" class="feed"></div>
+    </section>
+
+    <section id="tab-ratings" class="tab" hidden>
+      <h2>Rate what you watched</h2>
+      <div id="to-rate" class="poster-row"></div>
+      <div class="search-row">
+        <input id="search" placeholder="Search anything to rate…" autocomplete="off">
+      </div>
+      <div id="search-results" class="poster-row"></div>
+      <h2>Reviews</h2>
+      <div id="ratings" class="reviews"></div>
+    </section>
+
+    <section id="tab-history" class="tab" hidden>
+      <h2>Playback history</h2>
+      <p class="muted small">Every play session since tracking started, including partial watches.</p>
+      <div class="table-wrap"><table id="history"></table></div>
+    </section>
+
+    <section id="tab-system" class="tab" hidden>
+      <div id="system"></div>
+    </section>
+  </main>
+</div>
+
+<dialog id="rate-dialog">
+  <form id="rate-form" method="dialog">
+    <div class="rate-head">
+      <img id="rate-img" alt="">
+      <div>
+        <div id="rate-title" class="rate-title"></div>
+        <div id="rate-target" class="chips"></div>
+      </div>
+    </div>
+    <div id="rate-scores" class="scores"></div>
+    <input id="rate-note" maxlength="280" placeholder="One-liner (optional)">
+    <div class="rate-actions">
+      <button type="button" id="rate-delete" class="ghost danger" hidden>Remove my rating</button>
+      <span class="spacer"></span>
+      <button type="button" id="rate-cancel" class="ghost">Cancel</button>
+      <button type="submit" id="rate-save">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

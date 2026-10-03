@@ -1,0 +1,70 @@
+name: Build and deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/monitor
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Python compiles
+        run: python -m py_compile app.py
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    # The runner on the media server (see media-stack/scripts/install-runner.sh)
+    runs-on: [self-hosted, media-server]
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Pin and pull this build
+        working-directory: /opt/media-stack
+        run: |
+          docker pull "$IMAGE:sha-${{ github.sha }}"
+          docker tag "$IMAGE:sha-${{ github.sha }}" "$IMAGE:latest"
+      - name: Restart monitor
+        working-directory: /opt/media-stack
+        run: docker compose up -d --no-deps monitor
+      - name: Wait for healthy
+        run: |
+          for i in $(seq 1 30); do
+            s=$(docker inspect -f '{{.State.Health.Status}}' monitor)
+            echo "health: $s"
+            [ "$s" = healthy ] && exit 0
+            sleep 3
+          done
+          docker logs --tail 50 monitor
+          exit 1
+      - name: Log out of GHCR
+        if: always()
+        run: docker logout ghcr.io
