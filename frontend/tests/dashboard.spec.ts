@@ -167,6 +167,13 @@ async function fixture(page: Page, authenticated = true) {
       status = authenticated ? 200 : 401;
     } else if (path === "/api/login")
       body = { id: alice, name: "Alessandro", admin: true };
+    else if (path === "/api/users")
+      body = users.map((user) => ({
+        id: user.user_id,
+        name: user.user_name,
+        image_tag: null,
+        can_edit_image: user.user_id === alice,
+      }));
     else if (path === "/api/analytics") body = analytics(request.url());
     else if (path === "/api/now")
       body = [
@@ -378,6 +385,216 @@ test("custom calendar range can be applied", async ({ page }) => {
   await expect(
     page.getByRole("button", { name: /2 Oct – 3 Oct 2026/ }),
   ).toBeVisible();
+});
+
+const profilePng = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64",
+);
+
+async function openProfile(page: Page) {
+  if ((page.viewportSize()?.width || 1440) <= 960)
+    await page
+      .getByRole("button", { name: "Open navigation", exact: true })
+      .click();
+  await page.getByRole("button", { name: "Edit profile picture" }).click();
+}
+
+test("Jellyfin profile pictures sync, upload and remove across the app", async ({
+  page,
+}) => {
+  await fixture(page);
+  let tag: string | null = "original";
+  let rejectUpload = true;
+  await page.route("**/api/users", (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: alice,
+          name: "Alessandro",
+          image_tag: tag,
+          can_edit_image: true,
+        },
+      ],
+    }),
+  );
+  await page.route("**/api/users/*/image?*", (route) =>
+    route.fulfill({ contentType: "image/png", body: profilePng }),
+  );
+  await page.route("**/api/me/image", (route) => {
+    if (rejectUpload && route.request().method() === "POST")
+      return route.fulfill({
+        status: 403,
+        json: { detail: "Jellyfin does not allow this profile picture change" },
+      });
+    tag = route.request().method() === "DELETE" ? null : "updated";
+    return route.fulfill({
+      json: {
+        id: alice,
+        name: "Alessandro",
+        image_tag: tag,
+        can_edit_image: true,
+      },
+    });
+  });
+  await page.goto("/");
+  await expect(
+    page.locator('.viewer-avatar img[src*="tag=original"]').first(),
+  ).toBeAttached();
+  await expect
+    .poll(() => page.locator('.viewer-avatar img[src*="tag=original"]').count())
+    .toBeGreaterThanOrEqual(3);
+  await openProfile(page);
+  await page.getByLabel("Choose a picture").setInputFiles({
+    name: "avatar.png",
+    mimeType: "image/png",
+    buffer: profilePng,
+  });
+  await expect(page.getByAltText("New profile picture preview")).toBeVisible();
+  await page.getByRole("button", { name: "Save picture", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText(
+    "Jellyfin does not allow",
+  );
+  await expect(
+    page.locator('.viewer-avatar img[src*="tag=original"]').first(),
+  ).toBeAttached();
+  rejectUpload = false;
+  const upload = page.waitForRequest(
+    (r) => r.url().endsWith("/api/me/image") && r.method() === "POST",
+  );
+  await page.getByRole("button", { name: "Save picture", exact: true }).click();
+  expect((await upload).postDataBuffer()).toEqual(profilePng);
+  await expect(page.getByRole("status")).toContainText("saved to Jellyfin");
+  await expect
+    .poll(() => page.locator('.viewer-avatar img[src*="tag=updated"]').count())
+    .toBeGreaterThanOrEqual(3);
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await navigate(page, "Now playing");
+  await expect(
+    page.locator('.playing-person img[src*="tag=updated"]'),
+  ).toBeVisible();
+  await navigate(page, "Ratings");
+  await expect(
+    page.locator('.user-review img[src*="tag=updated"]'),
+  ).toBeVisible();
+  await navigate(page, "History");
+  await expect(
+    page.locator('.table-viewer img[src*="tag=updated"]'),
+  ).toBeVisible();
+  await openProfile(page);
+  await page
+    .getByRole("button", { name: "Remove picture", exact: true })
+    .click();
+  await expect(page.getByRole("status")).toContainText("removed from Jellyfin");
+  await expect(page.locator(".viewer-avatar img")).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Remove picture", exact: true }),
+  ).toBeDisabled();
+  await page.getByRole("button", { name: "Done", exact: true }).click();
+  await page.reload();
+  await expect(page.locator(".viewer-avatar img")).toHaveCount(0);
+});
+
+test("profile picture failures fall back to initials and invalid uploads stay local", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.route("**/api/users", (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: alice,
+          name: "Alessandro",
+          image_tag: "missing",
+          can_edit_image: true,
+        },
+      ],
+    }),
+  );
+  await page.route("**/api/users/*/image?*", (route) =>
+    route.fulfill({ status: 404 }),
+  );
+  await page.goto("/");
+  await openProfile(page);
+  await expect(
+    page.locator(".profile-picture-preview .viewer-avatar"),
+  ).toHaveText("A");
+  await page.getByLabel("Choose a picture").setInputFiles({
+    name: "avatar.svg",
+    mimeType: "image/svg+xml",
+    buffer: Buffer.from("<svg />"),
+  });
+  await expect(page.getByRole("alert")).toContainText("JPEG, PNG or WebP");
+  await page.getByLabel("Choose a picture").setInputFiles({
+    name: "large.png",
+    mimeType: "image/png",
+    buffer: Buffer.alloc(5 * 1024 * 1024 + 1),
+  });
+  await expect(page.getByRole("alert")).toContainText("smaller than 5 MB");
+  await expect(
+    page.getByRole("button", { name: "Save picture", exact: true }),
+  ).toBeDisabled();
+  await page.getByLabel("Choose a picture").setInputFiles({
+    name: "corrupt.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("broken"),
+  });
+  await expect(page.getByRole("alert")).toContainText("could not be opened");
+  await expect(
+    page.getByRole("button", { name: "Save picture", exact: true }),
+  ).toBeDisabled();
+});
+
+test("profile editor respects Jellyfin restrictions and meets accessibility checks", async ({
+  page,
+}, testInfo) => {
+  await fixture(page);
+  await page.route("**/api/users", (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: alice,
+          name: "Alessandro",
+          image_tag: null,
+          can_edit_image: false,
+        },
+      ],
+    }),
+  );
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  await openProfile(page);
+  await expect(
+    page.getByText(
+      "Your Jellyfin administrator has disabled profile picture changes.",
+    ),
+  ).toBeVisible();
+  await expect(page.getByLabel("Choose a picture")).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "Save picture", exact: true }),
+  ).toBeDisabled();
+  for (const theme of themes) {
+    await page.evaluate(({ value, light }) => {
+      document.documentElement.dataset.theme = value;
+      document.documentElement.classList.toggle("dark", !light);
+    }, theme);
+    await page.evaluate(
+      () =>
+        new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        ),
+    );
+    expect(
+      (
+        await new AxeBuilder({ page })
+          .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+          .analyze()
+      ).violations,
+    ).toEqual([]);
+  }
+  await page.screenshot({
+    path: `test-results/${testInfo.project.name}-profile.png`,
+  });
 });
 
 test("login and expired authentication", async ({ page }) => {

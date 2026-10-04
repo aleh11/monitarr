@@ -25,6 +25,14 @@ preference are remembered on the current device. Lavender has a light lilac
 palette; Cyber pairs electric pink with lime; Cinema uses velvet, brass and
 serif headings; Tron Evolution adds cyan-lit edges and a subtle grid.
 
+Profile pictures sync from Jellyfin across the account area, leaderboards, now
+playing, reviews and history. Click your account picture to preview, upload or
+remove your own picture. Changes also update Jellyfin and respect its current
+user preference policy. Uploads accept JPEG, PNG and WebP up to 5 MB and 16
+megapixels; Monitor corrects orientation, crops a 512-pixel square and strips
+metadata before saving. Pictures are proxied through the signed Monitor session,
+and missing or unavailable pictures fall back to initials.
+
 ### How measurement works
 
 Monitor samples Jellyfin sessions every five seconds and stores evidence of

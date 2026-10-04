@@ -75,7 +75,7 @@ export function useResource<T>(path: string, interval = 0) {
       window.clearInterval(timer);
     };
   }, [path, interval, version]);
-  return { data, error, loading, reload };
+  return { data, error, loading, reload, replace: setData };
 }
 
 export function post<T = { ok: boolean }>(

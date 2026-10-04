@@ -36,6 +36,8 @@ import {
 } from "@/components/ui/dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Avatar, BusyButton, ErrorState, Loading } from "@/components/shared";
+import { ProfileProvider } from "@/components/profile-context";
+import { ProfileDialog } from "@/components/profile-dialog";
 import {
   DateFilter,
   browserTimezone,
@@ -167,11 +169,13 @@ export default function App() {
             onTheme={() => setSettings(true)}
           />
         ) : (
-          <Dashboard
-            user={user}
-            onLogout={() => setUser(null)}
-            onTheme={() => setSettings(true)}
-          />
+          <ProfileProvider>
+            <Dashboard
+              user={user}
+              onLogout={() => setUser(null)}
+              onTheme={() => setSettings(true)}
+            />
+          </ProfileProvider>
         )}
         <Dialog open={settings} onOpenChange={setSettings}>
           <DialogContent className="theme-dialog">
@@ -325,6 +329,7 @@ function Dashboard({
     return nav.some((n) => n.id === saved) ? (saved as Tab) : "board";
   });
   const [mobileNav, setMobileNav] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   useEffect(() => {
     if (!mobileNav) return;
     const previous = document.body.style.overflow;
@@ -431,7 +436,16 @@ function Dashboard({
             Set the mood
           </button>
           <div className="account-row">
-            <Avatar name={user.name} />
+            <button
+              className="profile-button"
+              aria-label="Edit profile picture"
+              onClick={() => {
+                setMobileNav(false);
+                setProfileOpen(true);
+              }}
+            >
+              <Avatar name={user.name} userId={user.id} />
+            </button>
             <div>
               <strong>{user.name}</strong>
               <span>{user.admin ? "Administrator" : "Jellyfin viewer"}</span>
@@ -511,6 +525,11 @@ function Dashboard({
           <span>For the love of a good night in.</span>
         </footer>
       </div>
+      <ProfileDialog
+        user={user}
+        open={profileOpen}
+        onOpenChange={setProfileOpen}
+      />
     </div>
   );
 }

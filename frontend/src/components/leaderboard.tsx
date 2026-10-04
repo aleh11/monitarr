@@ -321,6 +321,7 @@ export function Leaderboard({ data }: { data: Analytics }) {
                     </span>
                     <Avatar
                       name={u.user_name}
+                      userId={u.user_id}
                       index={data.users.findIndex(
                         (v) => v.user_id === u.user_id,
                       )}
@@ -498,7 +499,7 @@ export function Leaderboard({ data }: { data: Analytics }) {
             {data.recent.length ? (
               data.recent.slice(0, 4).map((r, i) => (
                 <div className="recent-row" key={r.id}>
-                  <Avatar name={r.user_name} index={i} />
+                  <Avatar name={r.user_name} userId={r.user_id} index={i} />
                   <div>
                     <strong>{r.series_name || r.item_name}</strong>
                     <span>

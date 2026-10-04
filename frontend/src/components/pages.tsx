@@ -221,7 +221,7 @@ export function NowPage({ analytics }: { analytics?: Analytics }) {
                     : `${p.year || ""}`}
                 </p>
                 <div className="playing-person">
-                  <Avatar name={p.user} index={i} />
+                  <Avatar name={p.user} userId={p.user_id} index={i} />
                   <div>
                     <strong>{p.user}</strong>
                     <span>{p.device || p.client}</span>
@@ -268,7 +268,7 @@ export function NowPage({ analytics }: { analytics?: Analytics }) {
           <div className="recent-list">
             {analytics.recent.slice(0, 10).map((r, i) => (
               <div className="recent-row" key={r.id}>
-                <Avatar name={r.user_name} index={i} />
+                <Avatar name={r.user_name} userId={r.user_id} index={i} />
                 <div>
                   <strong>
                     {r.series_name
@@ -716,7 +716,7 @@ export function RatingsPage({ user }: { user: User }) {
                 {media.reviews.map((review) => (
                   <div className="user-review" key={review.user_id}>
                     <div>
-                      <Avatar name={review.user_name} />
+                      <Avatar name={review.user_name} userId={review.user_id} />
                       <strong>{review.user_name}</strong>
                       <span>{review.score}/10</span>
                     </div>
@@ -896,7 +896,7 @@ export function HistoryPage({
                       <TableRow key={r.id}>
                         <TableCell>
                           <div className="table-viewer">
-                            <Avatar name={r.user} />
+                            <Avatar name={r.user} userId={r.user_id} />
                             {r.user}
                           </div>
                         </TableCell>

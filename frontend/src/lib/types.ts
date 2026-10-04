@@ -1,4 +1,10 @@
 export type User = { id: string; name: string; admin: boolean };
+export type UserProfile = {
+  id: string;
+  name: string;
+  image_tag: string | null;
+  can_edit_image: boolean;
+};
 export type Media = {
   item_id: string;
   item_name: string;
@@ -64,6 +70,7 @@ export type Analytics = {
   })[];
 };
 export type Playing = Media & {
+  user_id?: string;
   user: string;
   device: string;
   client: string;
@@ -113,6 +120,7 @@ export type Activity = {
   client: string;
 };
 export type ReportedActivity = {
+  user_id?: string;
   at: string;
   user: string;
   name: string;

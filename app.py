@@ -1,9 +1,12 @@
 import asyncio
+import base64
+from io import BytesIO
 import os
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import UUID
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -11,6 +14,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 import tracking
+from PIL import Image, ImageOps, UnidentifiedImageError
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from pydantic import BaseModel, Field
 
@@ -268,6 +272,104 @@ async def me(user=Depends(current_user)):
     return user
 
 
+def profile_info(data, viewer_id):
+    policy = data.get("Policy") or {}
+    return {"id": norm_id(data["Id"]), "name": data["Name"],
+            "image_tag": data.get("PrimaryImageTag"),
+            "can_edit_image": norm_id(data["Id"]) == viewer_id and not policy.get("IsDisabled", False)
+            and bool(policy.get("IsAdministrator") or policy.get("EnableUserPreferenceAccess", False))}
+
+
+async def profile_request(method, path, **kwargs):
+    try:
+        response = await jf.request(method, path, **kwargs)
+    except httpx.HTTPError as error:
+        raise HTTPException(502, "Unable to reach Jellyfin. Please try again.") from error
+    if response.status_code == 403:
+        raise HTTPException(403, "Jellyfin does not allow this profile picture change")
+    if response.status_code == 404:
+        raise HTTPException(404, "Jellyfin profile or picture not found")
+    if response.status_code == 400:
+        raise HTTPException(400, "Jellyfin could not save this picture. Try another image.")
+    if not response.is_success:
+        raise HTTPException(502, "Jellyfin could not complete this request. Please try again.")
+    return response
+
+
+@app.get("/api/users")
+async def profiles(response: Response, user=Depends(current_user)):
+    data = await profile_request("GET", "/Users")
+    response.headers["Cache-Control"] = "no-store"
+    return [profile_info(profile, user["id"]) for profile in data.json()]
+
+
+async def editable_profile(user):
+    response = await profile_request("GET", f"/Users/{user['id']}")
+    data = response.json()
+    if not profile_info(data, user["id"])["can_edit_image"]:
+        raise HTTPException(403, "Your Jellyfin administrator has disabled profile picture changes")
+    return data
+
+
+def prepare_profile_image(data):
+    try:
+        with Image.open(BytesIO(data)) as image:
+            if image.format not in {"JPEG", "PNG", "WEBP"}:
+                raise HTTPException(415, "Choose a JPEG, PNG or WebP image")
+            if image.width * image.height > 16_000_000:
+                raise HTTPException(413, "Choose an image smaller than 16 megapixels")
+            image.load()
+            square = ImageOps.fit(ImageOps.exif_transpose(image).convert("RGBA"),
+                                  (512, 512), method=Image.Resampling.LANCZOS)
+            clean = Image.frombytes("RGBA", square.size, square.tobytes())
+            output = BytesIO()
+            clean.save(output, format="PNG")
+            return output.getvalue()
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as error:
+        raise HTTPException(422, "This image could not be opened. Choose another picture.") from error
+
+
+@app.post("/api/me/image")
+async def upload_profile_image(request: Request, user=Depends(current_user)):
+    if request.headers.get("content-type", "").split(";")[0].lower() not in {"image/jpeg", "image/png", "image/webp"}:
+        raise HTTPException(415, "Choose a JPEG, PNG or WebP image")
+    chunks = bytearray()
+    async for chunk in request.stream():
+        if len(chunks) + len(chunk) > 5 * 1024 * 1024:
+            raise HTTPException(413, "Choose a picture smaller than 5 MB")
+        chunks.extend(chunk)
+    image = await asyncio.to_thread(prepare_profile_image, bytes(chunks))
+    await editable_profile(user)
+    await profile_request("POST", f"/Users/{user['id']}/Images/Primary",
+                          content=base64.b64encode(image), headers={"Content-Type": "image/png"})
+    updated = await profile_request("GET", f"/Users/{user['id']}")
+    return profile_info(updated.json(), user["id"])
+
+
+@app.delete("/api/me/image")
+async def remove_profile_image(user=Depends(current_user)):
+    await editable_profile(user)
+    await profile_request("DELETE", f"/Users/{user['id']}/Images/Primary")
+    updated = await profile_request("GET", f"/Users/{user['id']}")
+    return profile_info(updated.json(), user["id"])
+
+
+@app.get("/api/users/{user_id}/image")
+async def profile_image(user_id: str, tag: str | None = None, user=Depends(current_user)):
+    try:
+        user_id = UUID(user_id).hex
+    except ValueError as error:
+        raise HTTPException(400, "Invalid viewer") from error
+    image = await profile_request("GET", f"/Users/{user_id}/Images/Primary",
+                                  params={"width": 160, "height": 160, "format": "Png", "tag": tag or ""})
+    content_type = image.headers.get("content-type", "").split(";")[0]
+    if content_type not in {"image/png", "image/jpeg", "image/webp", "image/gif"}:
+        raise HTTPException(502, "Jellyfin returned an invalid picture")
+    return Response(image.content, media_type=content_type,
+                    headers={"Cache-Control": "private, max-age=300" if tag else "no-store",
+                             "X-Content-Type-Options": "nosniff"})
+
+
 # --------------------------------------------------------------------- now
 @app.get("/api/now")
 async def now_playing(user=Depends(current_user)):
@@ -284,6 +386,7 @@ async def now_playing(user=Depends(current_user)):
         out.append({
             **item_info(it),
             "user": s.get("UserName"),
+            "user_id": norm_id(s.get("UserId")),
             "client": s.get("Client"), "device": s.get("DeviceName"),
             "progress": round(100 * (ps.get("PositionTicks") or 0) / runtime, 1) if runtime else None,
             "paused": ps.get("IsPaused", False),
@@ -580,6 +683,7 @@ async def history(user=Depends(current_user)):
     for row in data.get("results", []):
         d = dict(zip(cols, row))
         out.append({"at": d["DateCreated"], "user": names.get(norm_id(d["UserId"]), "?"),
+                    "user_id": norm_id(d["UserId"]),
                     "item_id": norm_id(d["ItemId"]), "type": d["ItemType"], "name": d["ItemName"],
                     "method": d["PlaybackMethod"], "client": d["ClientName"], "device": d["DeviceName"],
                     "seconds": int(d["PlayDuration"] or 0)})

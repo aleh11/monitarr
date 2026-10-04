@@ -3,6 +3,7 @@ import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Media } from "@/lib/types";
+import { profileImageUrl, useProfiles } from "@/components/profile-context";
 
 export function duration(seconds: number) {
   const minutes = Math.floor(Math.max(0, seconds) / 60);
@@ -26,10 +27,28 @@ export function initials(name: string) {
     .join("")
     .toUpperCase();
 }
-export function Avatar({ name, index = 0 }: { name: string; index?: number }) {
+export function Avatar({
+  name,
+  userId,
+  index = 0,
+}: {
+  name: string;
+  userId?: string;
+  index?: number;
+}) {
+  const { profiles } = useProfiles();
+  const profile = profiles.find((item) =>
+    userId ? item.id === userId : item.name === name,
+  );
+  const src = profileImageUrl(profile);
+  const [failed, setFailed] = useState<string>();
   return (
-    <span className={`viewer-avatar avatar-${index % 5}`}>
-      {initials(name)}
+    <span className={`viewer-avatar avatar-${index % 5}`} aria-hidden="true">
+      {src && failed !== src ? (
+        <img src={src} alt="" loading="lazy" onError={() => setFailed(src)} />
+      ) : (
+        initials(name)
+      )}
     </span>
   );
 }
