@@ -20,7 +20,10 @@ There are five rankings, with shared winners on ties:
 
 The daily timeline can show everyone or one viewer. The viewing mix divides movie
 and episode time, and top titles and recent completions follow the same range.
-Midnight, Daylight, Plum and system themes are remembered on the current device.
+Midnight, Daylight, Plum, Lavender, Cyber, Cinema, Tron Evolution and the system
+preference are remembered on the current device. Lavender has a light lilac
+palette; Cyber pairs electric pink with lime; Cinema uses velvet, brass and
+serif headings; Tron Evolution adds cyan-lit edges and a subtle grid.
 
 ### How measurement works
 

@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { api, ApiError, post, useResource } from "@/lib/api";
 import type { Analytics, User } from "@/lib/types";
+import { themes, type Theme } from "@/lib/themes";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -64,7 +65,6 @@ const nav = [
   { id: "system", name: "System", icon: Activity },
 ] as const;
 export type Tab = (typeof nav)[number]["id"];
-type Theme = "midnight" | "daylight" | "plum" | "system";
 function stored(key: string, fallback: string) {
   try {
     return localStorage.getItem(key) || fallback;
@@ -83,7 +83,7 @@ function save(key: string, value: string) {
 export default function App() {
   const [theme, setTheme] = useState<Theme>(() => {
     const value = stored("monitor:theme", "midnight");
-    return ["midnight", "daylight", "plum", "system"].includes(value)
+    return value === "system" || themes.some((option) => option.value === value)
       ? (value as Theme)
       : "midnight";
   });
@@ -98,17 +98,15 @@ export default function App() {
       document.documentElement.dataset.theme = resolved;
       document.documentElement.classList.toggle(
         "dark",
-        resolved !== "daylight",
+        !themes.find((option) => option.value === resolved)?.light,
       );
       document
         .querySelector('meta[name="theme-color"]')
         ?.setAttribute(
           "content",
-          resolved === "daylight"
-            ? "#f3f6fb"
-            : resolved === "plum"
-              ? "#23192e"
-              : "#101a30",
+          getComputedStyle(document.documentElement)
+            .getPropertyValue("--background")
+            .trim(),
         );
     };
     update();
@@ -141,9 +139,11 @@ export default function App() {
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="midnight">Midnight</SelectItem>
-        <SelectItem value="daylight">Daylight</SelectItem>
-        <SelectItem value="plum">Plum</SelectItem>
+        {themes.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.name}
+          </SelectItem>
+        ))}
         <SelectItem value="system">System preference</SelectItem>
       </SelectContent>
     </Select>
@@ -174,7 +174,7 @@ export default function App() {
           />
         )}
         <Dialog open={settings} onOpenChange={setSettings}>
-          <DialogContent>
+          <DialogContent className="theme-dialog">
             <DialogHeader>
               <DialogTitle>Set the mood</DialogTitle>
               <DialogDescription>
@@ -183,19 +183,19 @@ export default function App() {
               </DialogDescription>
             </DialogHeader>
             <div className="theme-options">
-              {(["midnight", "daylight", "plum"] as Theme[]).map((value) => (
+              {themes.map(({ value, name }) => (
                 <button
                   key={value}
-                  className={`theme-option theme-${value} ${theme === value ? "theme-selected" : ""}`}
+                  className={`theme-option ${theme === value ? "theme-selected" : ""}`}
                   aria-pressed={theme === value}
                   onClick={() => setTheme(value)}
                 >
-                  <span className="theme-preview">
+                  <span className="theme-preview" data-theme={value}>
                     <i />
                     <i />
                     <i />
                   </span>
-                  <strong>{value[0].toUpperCase() + value.slice(1)}</strong>
+                  <strong>{name}</strong>
                 </button>
               ))}
             </div>
@@ -254,7 +254,11 @@ function Login({
           aria-label="Choose theme"
           onClick={onTheme}
         >
-          {theme === "daylight" ? <Sun /> : <Moon />}
+          {themes.find((option) => option.value === theme)?.light ? (
+            <Sun />
+          ) : (
+            <Moon />
+          )}
         </Button>
       </header>
       <div className="login-content">

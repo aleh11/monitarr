@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { themes } from "../src/lib/themes";
 
 const alice = "a".repeat(32);
 const itemId = "1".repeat(32);
@@ -317,11 +318,52 @@ test("leaderboard metric, range, timezone and theme selections work", async ({
     .getByRole("button", { name: "Set the mood", exact: true })
     .first()
     .click();
-  await page.getByRole("button", { name: "Daylight", exact: true }).click();
+  for (const theme of themes) {
+    await page.getByRole("button", { name: theme.name, exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-theme",
+      theme.value,
+    );
+    await expect(
+      page.getByRole("button", { name: theme.name, exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      await page
+        .locator("html")
+        .evaluate((el) => el.classList.contains("dark")),
+    ).toBe(!theme.light);
+    await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute(
+      "content",
+      await page
+        .locator("html")
+        .evaluate((el) =>
+          getComputedStyle(el).getPropertyValue("--background").trim(),
+        ),
+    );
+    await page.getByRole("button", { name: "Done", exact: true }).click();
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-theme",
+      theme.value,
+    );
+    if ((page.viewportSize()?.width || 1440) <= 960)
+      await page
+        .getByRole("button", { name: "Open navigation", exact: true })
+        .click();
+    await page
+      .getByRole("button", { name: "Set the mood", exact: true })
+      .first()
+      .click();
+    await expect(page.getByRole("dialog")).toBeInViewport();
+  }
+  await page.getByRole("combobox", { name: "Theme", exact: true }).click();
+  await page
+    .getByRole("option", { name: "System preference", exact: true })
+    .click();
+  await page.emulateMedia({ colorScheme: "light" });
   await expect(page.locator("html")).toHaveAttribute("data-theme", "daylight");
-  await page.getByRole("button", { name: "Done", exact: true }).click();
-  await page.reload();
-  await expect(page.locator("html")).toHaveAttribute("data-theme", "daylight");
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "midnight");
 });
 
 test("custom calendar range can be applied", async ({ page }) => {
@@ -480,26 +522,21 @@ test("desktop and mobile previews have no overflow or runtime errors", async ({
       ),
     )
     .toBe(true);
-  await page.screenshot({
-    path: `test-results/${testInfo.project.name}-midnight.png`,
-    fullPage: true,
-  });
-  await page.evaluate(() => {
-    document.documentElement.dataset.theme = "daylight";
-    document.documentElement.classList.remove("dark");
-  });
-  await page.screenshot({
-    path: `test-results/${testInfo.project.name}-daylight.png`,
-    fullPage: true,
-  });
-  await page.evaluate(() => {
-    document.documentElement.dataset.theme = "plum";
-    document.documentElement.classList.add("dark");
-  });
-  await page.screenshot({
-    path: `test-results/${testInfo.project.name}-plum.png`,
-    fullPage: true,
-  });
+  for (const theme of themes) {
+    await page.evaluate(({ value, light }) => {
+      document.documentElement.dataset.theme = value;
+      document.documentElement.classList.toggle("dark", !light);
+    }, theme);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: `test-results/${testInfo.project.name}-${theme.value}.png`,
+      fullPage: true,
+    });
+  }
   expect(errors).toEqual([]);
 });
 
@@ -510,10 +547,10 @@ test("dashboard themes meet accessibility checks", async ({ page }) => {
     page.getByRole("heading", { name: /A little friendly/ }),
   ).toBeVisible();
   await page.emulateMedia({ reducedMotion: "reduce" });
-  for (const theme of ["midnight", "daylight", "plum"]) {
-    await page.evaluate((value) => {
+  for (const theme of themes) {
+    await page.evaluate(({ value, light }) => {
       document.documentElement.dataset.theme = value;
-      document.documentElement.classList.toggle("dark", value !== "daylight");
+      document.documentElement.classList.toggle("dark", !light);
     }, theme);
     await page.evaluate(
       () =>
@@ -521,6 +558,21 @@ test("dashboard themes meet accessibility checks", async ({ page }) => {
           requestAnimationFrame(() => requestAnimationFrame(resolve)),
         ),
     );
+    const chartLabels = await page
+      .locator('[data-slot="chart"] .recharts-cartesian-axis-tick-value')
+      .evaluateAll((labels) => {
+        const sample = document.createElement("span");
+        sample.style.color = "var(--muted-foreground)";
+        document.body.append(sample);
+        const expected = getComputedStyle(sample).color;
+        sample.remove();
+        return labels.map((label) => ({
+          fill: getComputedStyle(label).fill,
+          expected,
+        }));
+      });
+    expect(chartLabels.length).toBeGreaterThan(0);
+    for (const label of chartLabels) expect(label.fill).toBe(label.expected);
     const result = await new AxeBuilder({ page })
       .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
       .analyze();
