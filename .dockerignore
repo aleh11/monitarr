@@ -1,0 +1,10 @@
+.git
+.venv
+.pytest_cache
+__pycache__
+frontend/node_modules
+frontend/test-results
+frontend/playwright-report
+static/assets
+*.db
+.DS_Store

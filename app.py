@@ -1,16 +1,5 @@
-"""monitor — small dashboard for the media stack.
-
-Reads Jellyfin (sessions, Playback Reporting history, per-user play counts),
-keeps its own SQLite for ratings and the runtime leaderboard, and reports host
-stats (disks, CPU, RAM, temps), container status and the Sonarr/Radarr queue.
-
-Leaderboard rule: a finished movie/episode credits its full runtime to the
-user who finished it. Tracking starts when the app first sees a user; anything
-watched before that is baseline and never counts (no backlog).
-"""
 import asyncio
 import os
-import sqlite3
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -20,6 +9,8 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+
+import tracking
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from pydantic import BaseModel, Field
 
@@ -32,7 +23,8 @@ SECRET = os.environ["SESSION_SECRET"]
 DB_PATH = os.environ.get("DB_PATH", "/data/monitor.db")
 # label=path pairs; statvfs on a path reports the filesystem it lives on
 DISKS = [d.split("=", 1) for d in os.environ.get("DISKS", "NVMe=/data").split(",") if "=" in d]
-POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "60"))
+POLL_SECONDS = 5
+tracking_health = {"error": None}
 COOKIE = "monitor_session"
 SESSION_DAYS = 30
 
@@ -45,9 +37,7 @@ cpu_state = {"pct": None}
 
 # --------------------------------------------------------------------------- db
 def db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+    return tracking.connect(DB_PATH)
 
 
 def init_db():
@@ -107,37 +97,11 @@ def item_info(it):
     }
 
 
-async def poll_completions():
-    """Diff each user's per-item PlayCount against the last snapshot."""
-    users = await jf_users()
-    with db() as c:
-        for u in users:
-            uid = norm_id(u["Id"])
-            r = await jf.get(f"/Users/{u['Id']}/Items", params={
-                "Recursive": "true", "IncludeItemTypes": "Movie,Episode",
-                "Filters": "IsPlayed", "EnableUserData": "true",
-                "Fields": "RunTimeTicks,SeriesName,SeriesId,ProductionYear"})
-            r.raise_for_status()
-            items = r.json()["Items"]
-            tracked = c.execute("SELECT 1 FROM tracked_users WHERE user_id=?", (uid,)).fetchone()
-            known = {row["item_id"]: row["play_count"] for row in
-                     c.execute("SELECT item_id, play_count FROM playcounts WHERE user_id=?", (uid,))}
-            for it in items:
-                iid = norm_id(it["Id"])
-                count = (it.get("UserData") or {}).get("PlayCount") or 0
-                prev = known.get(iid)
-                if tracked:
-                    new_plays = count - (prev or 0)
-                    for _ in range(max(0, new_plays)):
-                        info = item_info(it)
-                        c.execute("""INSERT INTO completions (user_id,user_name,item_id,item_type,item_name,
-                                     series_name,series_id,runtime_s,at) VALUES (?,?,?,?,?,?,?,?,?)""",
-                                  (uid, u["Name"], iid, info["item_type"], info["item_name"],
-                                   info["series_name"], info["series_id"], info["runtime_s"], now_iso()))
-                if prev != count:
-                    c.execute("INSERT OR REPLACE INTO playcounts VALUES (?,?,?)", (uid, iid, count))
-            if not tracked:
-                c.execute("INSERT INTO tracked_users VALUES (?,?)", (uid, now_iso()))
+async def poll_playback():
+    response = await jf.get("/Sessions", params={"activeWithinSeconds": 60})
+    response.raise_for_status()
+    await asyncio.to_thread(tracking.observe, DB_PATH, response.json(), time.time())
+    tracking_health["error"] = None
 
 
 # ---------------------------------------------------------------- host stats
@@ -211,22 +175,25 @@ def meminfo():
 
 # --------------------------------------------------------------- background
 async def background():
-    prev = read_cpu()
+    prev = read_cpu() if Path("/proc/stat").exists() else None
     last_poll = last_disk = 0
     while True:
         await asyncio.sleep(5)
-        cur = read_cpu()
-        d_total = cur[1] - prev[1]
-        if d_total:
-            cpu_state["pct"] = round(100 * (1 - (cur[0] - prev[0]) / d_total), 1)
-        prev = cur
+        if prev is not None:
+            cur = read_cpu()
+            d_total = cur[1] - prev[1]
+            if d_total:
+                cpu_state["pct"] = round(100 * (1 - (cur[0] - prev[0]) / d_total), 1)
+            prev = cur
         t = time.time()
         if t - last_poll >= POLL_SECONDS:
             last_poll = t
             try:
-                await poll_completions()
-            except Exception as e:  # keep the loop alive through Jellyfin restarts
-                print("poll_completions failed:", repr(e), flush=True)
+                await poll_playback()
+            except Exception as e:
+                tracking_health["error"] = "Jellyfin is unreachable. Viewing will resume when it reconnects."
+                await asyncio.to_thread(tracking.mark_gap, DB_PATH)
+                print("poll_playback failed:", repr(e), flush=True)
         if t - last_disk >= 3600:
             last_disk = t
             sample_disks()
@@ -235,9 +202,16 @@ async def background():
 @asynccontextmanager
 async def lifespan(app):
     init_db()
+    tracking.initialize(DB_PATH)
     task = asyncio.create_task(background())
     yield
     task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    await jf.aclose()
+    await http.aclose()
 
 
 app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None)
@@ -322,22 +296,22 @@ async def now_playing(user=Depends(current_user)):
 
 # ------------------------------------------------------------- leaderboard
 @app.get("/api/leaderboard")
-async def leaderboard(user=Depends(current_user)):
-    week_ago = datetime.fromtimestamp(time.time() - 7 * 86400, timezone.utc).isoformat()
-    with db() as c:
-        def board(where="", args=()):
-            return [dict(r) for r in c.execute(f"""
-                SELECT user_name, SUM(runtime_s) AS seconds,
-                       SUM(item_type='Movie') AS movies, SUM(item_type='Episode') AS episodes
-                FROM completions {where} GROUP BY user_id ORDER BY seconds DESC""", args)]
-        top_shows = [dict(r) for r in c.execute("""
-            SELECT user_name, series_name, COUNT(*) AS episodes, SUM(runtime_s) AS seconds
-            FROM completions WHERE item_type='Episode' GROUP BY user_id, series_id
-            ORDER BY seconds DESC LIMIT 10""")]
-        recent = [dict(r) for r in c.execute("SELECT * FROM completions ORDER BY id DESC LIMIT 30")]
-        since = c.execute("SELECT MIN(since) FROM tracked_users").fetchone()[0]
-    return {"since": since, "all_time": board(), "week": board("WHERE at >= ?", (week_ago,)),
-            "top_shows": top_shows, "recent": recent, "badges": badges()}
+@app.get("/api/analytics")
+async def leaderboard(start: str | None = None, end: str | None = None, tz: str = "UTC", user=Depends(current_user)):
+    try:
+        result = await asyncio.to_thread(tracking.analytics, DB_PATH, start, end, tz)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
+    result["tracking"]["error"] = tracking_health["error"]
+    return result
+
+
+@app.get("/api/activity")
+async def measured_activity(start: str | None = None, end: str | None = None, tz: str = "UTC", user=Depends(current_user)):
+    try:
+        return await asyncio.to_thread(tracking.activity, DB_PATH, start, end, tz)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
 
 
 # ----------------------------------------------------------------- ratings
@@ -591,45 +565,6 @@ async def taste(user=Depends(current_user)):
     return pairs
 
 
-# ------------------------------------------------------------------ badges
-def badges():
-    """Streaks and fun titles from finished watches (local time)."""
-    with db() as c:
-        rows = [dict(r) for r in c.execute("SELECT user_name, item_type, runtime_s, at FROM completions")]
-    per = {}
-    for r in rows:
-        t = datetime.fromisoformat(r["at"]).astimezone()
-        p = per.setdefault(r["user_name"], {"days": {}, "night": 0, "movies": 0})
-        p["days"][t.date()] = p["days"].get(t.date(), 0) + (r["item_type"] == "Episode")
-        p["night"] += 0 <= t.hour < 5
-        p["movies"] += r["item_type"] == "Movie"
-    today = datetime.now().astimezone().date()
-    stats = {}
-    for name, p in per.items():
-        days = sorted(p["days"])
-        best = cur = run = 0
-        prev = None
-        for d in days:
-            run = run + 1 if prev and (d - prev).days == 1 else 1
-            best = max(best, run)
-            prev = d
-        # a streak is still alive if the last watch was today or yesterday
-        cur = run if prev and (today - prev).days <= 1 else 0
-        stats[name] = {"streak": cur, "best_streak": best, "binge": max(p["days"].values(), default=0),
-                       "night": p["night"], "movies": p["movies"]}
-    titles = [("binge", "Binge Lord", "most episodes in one day"),
-              ("night", "Night Owl", "most watches between midnight and 5am"),
-              ("movies", "Cinephile", "most movies finished"),
-              ("best_streak", "Streaker", "longest daily watch streak")]
-    awards = []
-    for key, title, why in titles:
-        best = max((v[key] for v in stats.values()), default=0)
-        if best > 0:  # ties share the title
-            winners = [n for n, v in stats.items() if v[key] == best]
-            awards.append({"user": " & ".join(winners), "title": title, "why": why, "value": best})
-    return {"stats": stats, "awards": awards}
-
-
 # ----------------------------------------------------------------- history
 @app.get("/api/history")
 async def history(user=Depends(current_user)):
@@ -706,6 +641,7 @@ async def image(item_id: str, user=Depends(current_user)):
 
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+app.mount("/assets", StaticFiles(directory=STATIC / "assets", check_dir=False), name="assets")
 
 
 @app.get("/favicon.ico", include_in_schema=False)
