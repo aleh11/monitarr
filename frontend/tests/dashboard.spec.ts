@@ -412,7 +412,7 @@ test("leaderboard metric, range, timezone and theme selections work", async ({
   await expect(
     page.getByRole("heading", { name: /A little friendly/ }),
   ).toBeVisible();
-  await expect(page.getByText("24.3h", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("24:18", { exact: true }).first()).toBeVisible();
   await page.getByRole("button", { name: /Movies completed/ }).click();
   await expect(
     page.getByRole("combobox", { name: "Ranking metric" }),

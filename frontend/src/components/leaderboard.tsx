@@ -32,7 +32,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, Empty, duration, hours } from "@/components/shared";
+import { Avatar, Empty, watchTime } from "@/components/shared";
 import type { Analytics, Metric } from "@/lib/types";
 
 const metrics = [
@@ -81,7 +81,7 @@ const colors = [
 export function metricValue(metric: Metric, value: number) {
   return metric === "movies" || metric === "episodes"
     ? value.toLocaleString()
-    : hours(value);
+    : watchTime(value);
 }
 
 export function Leaderboard({ data }: { data: Analytics }) {
@@ -94,10 +94,15 @@ export function Leaderboard({ data }: { data: Analytics }) {
   const selectedViewer = data.users.find((u) => u.user_id === viewer);
   const chartData = data.daily.map((day) => ({
     ...day,
-    hours: (selectedViewer ? day.users[viewer] || 0 : day.seconds) / 3600,
+    watchSeconds: selectedViewer ? day.users[viewer] || 0 : day.seconds,
   }));
+  const tickStep = Math.max(
+    60,
+    Math.ceil(Math.max(0, ...chartData.map((day) => day.watchSeconds)) / 240) * 60,
+  );
+  const timeTicks = Array.from({ length: 5 }, (_, index) => index * tickStep);
   const config = {
-    hours: { label: "Watch time", color: "var(--chart-1)" },
+    watchSeconds: { label: "Watch time", color: "var(--chart-1)" },
   } satisfies ChartConfig;
   const breakdown = [
     { type: "Episode", seconds: data.breakdown.Episode, fill: colors[0] },
@@ -187,14 +192,14 @@ export function Leaderboard({ data }: { data: Analytics }) {
         </div>
         <div className="chart-headline">
           <strong>
-            {hours(
+            {watchTime(
               selectedViewer ? selectedViewer.seconds : data.totals.seconds,
             )}
           </strong>
           <span>of actual watch time</span>
           <span className="chart-key">
             <i />
-            Watch hours
+            Watch time
           </span>
         </div>
         <ChartContainer config={config} className="daily-chart">
@@ -233,8 +238,10 @@ export function Leaderboard({ data }: { data: Analytics }) {
             <YAxis
               tickLine={false}
               axisLine={false}
-              tickFormatter={(v) => `${v}h`}
-              width={42}
+              tickFormatter={watchTime}
+              ticks={timeTicks}
+              domain={[0, timeTicks[4]]}
+              width={58}
             />
             <ChartTooltip
               content={
@@ -244,7 +251,7 @@ export function Leaderboard({ data }: { data: Analytics }) {
                   }
                   formatter={(value) => (
                     <span className="tooltip-value">
-                      {Number(value).toFixed(2)} hours
+                      {watchTime(Number(value))}
                     </span>
                   )}
                 />
@@ -252,7 +259,7 @@ export function Leaderboard({ data }: { data: Analytics }) {
             />
             <Area
               type="monotone"
-              dataKey="hours"
+              dataKey="watchSeconds"
               stroke="var(--chart-1)"
               strokeWidth={2.5}
               fill="url(#watch-fill)"
@@ -381,7 +388,7 @@ export function Leaderboard({ data }: { data: Analytics }) {
                           nameKey="type"
                           formatter={(value, name) => (
                             <span>
-                              {name}: {duration(Number(value))}
+                              {name}: {watchTime(Number(value))}
                             </span>
                           )}
                         />
@@ -415,7 +422,7 @@ export function Leaderboard({ data }: { data: Analytics }) {
                       <i style={{ background: d.fill }} />
                       {d.type === "Episode" ? "Episodes" : "Movies"}
                     </span>
-                    <strong>{hours(d.seconds)}</strong>
+                    <strong>{watchTime(d.seconds)}</strong>
                   </div>
                 ))}
               </div>
@@ -468,7 +475,7 @@ export function Leaderboard({ data }: { data: Analytics }) {
                   content={
                     <ChartTooltipContent
                       formatter={(value) => (
-                        <span>{duration(Number(value))}</span>
+                        <span>{watchTime(Number(value))}</span>
                       )}
                     />
                   }

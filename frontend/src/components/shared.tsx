@@ -11,8 +11,9 @@ export function duration(seconds: number) {
     ? `${Math.floor(minutes / 60)}h ${minutes % 60}m`
     : `${minutes}m`;
 }
-export function hours(seconds: number) {
-  return `${(seconds / 3600).toFixed(1)}h`;
+export function watchTime(seconds: number) {
+  const minutes = Math.floor(Math.max(0, seconds) / 60);
+  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}`;
 }
 export function bytes(value: number) {
   return value >= 1e12
