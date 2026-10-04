@@ -57,6 +57,7 @@ jobs:
       contents: read
       packages: read
     steps:
+      - uses: actions/checkout@v4
       - name: Log in to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Pin and pull this build
@@ -64,6 +65,10 @@ jobs:
         run: |
           docker pull "$IMAGE:sha-${{ github.sha }}"
           docker tag "$IMAGE:sha-${{ github.sha }}" "$IMAGE:latest"
+      - name: Connect the existing Seerr service
+        env:
+          DEPLOY_SHA: ${{ github.sha }}
+        run: python3 scripts/connect_seerr.py
       - name: Restart monitor
         working-directory: /opt/media-stack
         run: docker compose up -d --no-deps monitor
@@ -77,6 +82,8 @@ jobs:
           done
           docker logs --tail 50 monitor
           exit 1
+      - name: Verify live discovery connections without submitting requests
+        run: python3 scripts/check_discovery.py
       - name: Log out of GHCR
         if: always()
         run: docker logout ghcr.io

@@ -1,4 +1,68 @@
 export type User = { id: string; name: string; admin: boolean };
+export type SeerrConnection = {
+  connected: boolean;
+  linked: boolean;
+  message: string;
+  public_url: string;
+  can_request_movie: boolean;
+  can_request_tv: boolean;
+};
+export type PickFilters = {
+  mode: "tonight" | "discover";
+  viewers: string[];
+  max_minutes: number | null;
+  media_type: "all" | "movie" | "tv";
+  genre: string;
+  mood: string;
+  unseen: boolean;
+  variation: number;
+};
+export type Pick = {
+  key: string;
+  item_id?: string;
+  play_item_id?: string;
+  media_type: "movie" | "tv";
+  media_id?: number;
+  name: string;
+  year?: number;
+  genres: string[];
+  overview: string;
+  runtime_minutes: number | null;
+  poster: string | null;
+  status: string;
+  reasons: string[];
+  episode_label?: string;
+  watch_url: string | null;
+  seerr_url: string | null;
+  imdb_url: string | null;
+};
+export type Picks = {
+  items: Pick[];
+  personalised: boolean;
+  integration: SeerrConnection | null;
+  candidate_count: number;
+  library_limited: boolean;
+  message: string;
+};
+export type PickOptions = {
+  viewers: { id: string; name: string }[];
+  genres: string[];
+  moods: { value: string; name: string }[];
+  integration: SeerrConnection;
+};
+export type RequestDetails = {
+  name: string;
+  status: string;
+  can_request: boolean;
+  partial_requests: boolean;
+  seasons: {
+    number: number;
+    name: string;
+    episodes: number;
+    status: string;
+    requestable: boolean;
+  }[];
+};
 export type UserProfile = {
   id: string;
   name: string;

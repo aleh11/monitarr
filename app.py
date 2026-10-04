@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 import tracking
+import recommendations
 from PIL import Image, ImageOps, UnidentifiedImageError
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from pydantic import BaseModel, Field
@@ -70,6 +71,7 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_completions_at ON completions(at);
         CREATE INDEX IF NOT EXISTS idx_disk ON disk_samples(label, ts);
         """)
+    recommendations.initialize(DB_PATH)
 
 
 def now_iso():
@@ -743,6 +745,9 @@ async def image(item_id: str, user=Depends(current_user)):
     return Response(r.content, media_type=r.headers.get("content-type", "image/jpeg"),
                     headers={"Cache-Control": "private, max-age=86400"})
 
+
+discovery_router, discovery = recommendations.create_router(current_user, lambda: jf, lambda: DB_PATH)
+app.include_router(discovery_router)
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 app.mount("/assets", StaticFiles(directory=STATIC / "assets", check_dir=False), name="assets")

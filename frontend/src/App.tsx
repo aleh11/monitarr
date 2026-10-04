@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useState, type FormEvent } from "react";
 import {
   Activity,
+  Compass,
   ArrowUpRight,
   History,
   LogOut,
@@ -38,6 +39,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Avatar, BusyButton, ErrorState, Loading } from "@/components/shared";
 import { ProfileProvider } from "@/components/profile-context";
 import { ProfileDialog } from "@/components/profile-dialog";
+import { DiscoverPage } from "@/components/discover";
 import {
   DateFilter,
   browserTimezone,
@@ -61,6 +63,7 @@ import {
 const nav = [
   { id: "now", name: "Now playing", icon: Radio },
   { id: "watch", name: "Watchlist", icon: MonitorPlay },
+  { id: "discover", name: "Discover", icon: Compass },
   { id: "board", name: "Leaderboard", icon: Trophy },
   { id: "ratings", name: "Ratings", icon: Star },
   { id: "history", name: "History", icon: History },
@@ -513,7 +516,10 @@ function Dashboard({
               </Suspense>
             ) : null)}
           {tab === "now" && <NowPage analytics={analytics.data} />}
-          {tab === "watch" && <WatchPage user={user} />}
+          {tab === "watch" && (
+            <WatchPage user={user} onDiscover={() => changeTab("discover")} />
+          )}
+          {tab === "discover" && <DiscoverPage user={user} />}
           {tab === "ratings" && <RatingsPage user={user} />}
           {tab === "history" && (
             <HistoryPage query={query} timezone={timezone} />

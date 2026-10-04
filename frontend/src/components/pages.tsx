@@ -3,7 +3,7 @@ import { format, parseISO } from "date-fns";
 import {
   Activity as ActivityIcon,
   Check,
-  Dice5,
+  Compass,
   Film,
   Pause,
   Play,
@@ -296,20 +296,20 @@ export function NowPage({ analytics }: { analytics?: Analytics }) {
   );
 }
 
-export function WatchPage({ user }: { user: User }) {
+export function WatchPage({
+  user,
+  onDiscover,
+}: {
+  user: User;
+  onDiscover: () => void;
+}) {
   const up = useResource<Media[]>("/api/up-next", 60000);
   const list = useResource<WatchItem[]>("/api/watchlist", 60000);
   const fresh = useResource<Media[]>("/api/latest", 60000);
   const mutation = useMutation();
   const [adding, setAdding] = useState<Media | null>(null);
   const [note, setNote] = useState("");
-  const [picked, setPicked] = useState<WatchItem | null>(null);
   const [showDone, setShowDone] = useState(false);
-  const candidates = (list.data || []).filter((i) => !i.done && !i.missing);
-  function pick() {
-    if (candidates.length)
-      setPicked(candidates[Math.floor(Math.random() * candidates.length)]);
-  }
   function reload() {
     list.reload();
     fresh.reload();
@@ -348,12 +348,8 @@ export function WatchPage({ user }: { user: User }) {
             <h2>The shared watchlist</h2>
             <p>A good plan starts with a good pick.</p>
           </div>
-          <Button
-            variant="outline"
-            onClick={pick}
-            disabled={!candidates.length}
-          >
-            <Dice5 />
+          <Button variant="outline" onClick={onDiscover}>
+            <Compass />
             Pick for us
           </Button>
         </div>
@@ -546,31 +542,6 @@ export function WatchPage({ user }: { user: User }) {
           >
             Add to watchlist
           </BusyButton>
-        </DialogContent>
-      </Dialog>
-      <Dialog
-        open={!!picked}
-        onOpenChange={(open) => {
-          if (!open) setPicked(null);
-        }}
-      >
-        <DialogContent className="pick-dialog">
-          <DialogHeader>
-            <DialogTitle>Tonight's pick</DialogTitle>
-            <DialogDescription>
-              {picked?.in.length
-                ? `Who's in: ${picked.in.join(", ")}`
-                : "Your next movie night, sorted."}
-            </DialogDescription>
-          </DialogHeader>
-          {picked && <Poster media={picked} />}
-          <div className="dialog-actions">
-            <Button variant="outline" onClick={pick}>
-              <Dice5 />
-              Pick again
-            </Button>
-            <Button onClick={() => setPicked(null)}>Let's watch it</Button>
-          </div>
         </DialogContent>
       </Dialog>
     </>

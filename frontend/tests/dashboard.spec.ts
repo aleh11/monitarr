@@ -160,7 +160,119 @@ async function fixture(page: Page, authenticated = true) {
     const path = url.pathname;
     let body: unknown = { ok: true };
     let status = 200;
-    if (path === "/api/me") {
+    if (path === "/api/recommendations/options") {
+      body = {
+        viewers: [
+          { id: alice, name: "Alessandro" },
+          { id: "bob", name: "Sarah" },
+        ],
+        genres: ["Comedy", "Science Fiction", "Drama"],
+        moods: [
+          { value: "any", name: "Any mood" },
+          { value: "light", name: "Something light" },
+          { value: "escape", name: "An escape" },
+        ],
+        integration: {
+          connected: true,
+          linked: true,
+          message: "Requests follow your Seerr permissions and approval rules.",
+          public_url: "https://seerr.test",
+          can_request_movie: true,
+          can_request_tv: true,
+        },
+      };
+    } else if (path === "/api/recommendations") {
+      const filters = request.postDataJSON();
+      const picks = [
+        {
+          key: "movie:99",
+          media_type: "movie",
+          media_id: 99,
+          name: "Galaxy Quest",
+          year: 1999,
+          genres: ["Comedy", "Science Fiction"],
+          overview:
+            "A television crew discovers that their fictional adventures have become someone else’s reality.",
+          runtime_minutes: 102,
+          poster: null,
+          status: filters.mode === "tonight" ? "available" : "missing",
+          watch_url: "https://jellyfin.test/web/index.html#!/details?id=galaxy",
+          seerr_url: "https://seerr.test/movie/99",
+          imdb_url: "https://www.imdb.com/title/tt0177789/",
+          reasons: [
+            "Comedy matches Alessandro’s highly rated titles",
+            "No selected viewer has marked this title watched",
+            "102 minutes fits your 120-minute window",
+          ],
+        },
+        {
+          key: "tv:100",
+          media_type: "tv",
+          media_id: 100,
+          name: "The Good Place",
+          year: 2016,
+          genres: ["Comedy"],
+          overview: "Four people try to understand what makes a good life.",
+          runtime_minutes: 22,
+          poster: null,
+          status: filters.mode === "tonight" ? "available" : "partial",
+          watch_url: "https://jellyfin.test/web/index.html#!/details?id=good",
+          seerr_url: "https://seerr.test/tv/100",
+          imdb_url: null,
+          reasons: [
+            "Comedy matches Sarah’s highly rated titles",
+            "22 minutes fits your evening",
+          ],
+        },
+      ];
+      body = {
+        items: picks.filter(
+          (pick) =>
+            (!filters.max_minutes ||
+              pick.runtime_minutes <= filters.max_minutes) &&
+            (filters.media_type === "all" ||
+              pick.media_type === filters.media_type),
+        ),
+        personalised: true,
+        integration: null,
+        candidate_count: 42,
+        library_limited: false,
+        message:
+          "Ratings guide your picks; verified completions add a smaller signal. Mood uses genres.",
+      };
+    } else if (path === "/api/seerr/movie/99" || path === "/api/seerr/tv/100") {
+      body = {
+        name: path.includes("/movie/") ? "Galaxy Quest" : "The Good Place",
+        status: path.includes("/movie/") ? "missing" : "partial",
+        can_request: true,
+        partial_requests: true,
+        seasons: [
+          {
+            number: 1,
+            name: "Season 1",
+            episodes: 13,
+            status: "available",
+            requestable: false,
+          },
+          {
+            number: 2,
+            name: "Season 2",
+            episodes: 13,
+            status: "missing",
+            requestable: true,
+          },
+          {
+            number: 3,
+            name: "Season 3",
+            episodes: 13,
+            status: "missing",
+            requestable: true,
+          },
+        ],
+      };
+    } else if (path === "/api/seerr/request") {
+      body = { ok: true, status: "pending", request_id: 12 };
+    } else if (path === "/api/me") {
       body = authenticated
         ? { id: alice, name: "Alessandro", admin: true }
         : { detail: "Unauthorized" };
@@ -635,11 +747,12 @@ test("existing workflows render and persist ratings and watchlist actions", asyn
   await join;
   await page.getByRole("button", { name: "Pick for us", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Tonight's pick" }),
+    page.getByRole("heading", { name: "Tonight’s pick" }),
   ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Let's watch it", exact: true })
-    .click();
+  await expect(
+    page.getByRole("link", { name: "Watch now", exact: true }).first(),
+  ).toHaveAttribute("href", /jellyfin/);
+  await navigate(page, "Watchlist");
   await page
     .getByRole("textbox", { name: "Find a movie or series to add…" })
     .fill("Rick");
@@ -803,4 +916,262 @@ test("dashboard themes meet accessibility checks", async ({ page }) => {
       })),
     ).toEqual([]);
   }
+});
+
+test("smart picks filter viewers and episode time, persist feedback and undo", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.goto("/");
+  await navigate(page, "Discover");
+  await expect(
+    page.getByRole("heading", { name: "Galaxy Quest" }),
+  ).toBeVisible();
+  const viewers = page.waitForRequest(
+    (r) =>
+      new URL(r.url()).pathname === "/api/recommendations" &&
+      r.postDataJSON().viewers.includes("bob"),
+  );
+  await page
+    .getByRole("button", { name: "Include Sarah", exact: true })
+    .click();
+  expect((await viewers).postDataJSON().viewers).toEqual([alice, "bob"]);
+  await page.getByRole("combobox", { name: "Time available" }).click();
+  await page
+    .getByRole("option", { name: "Up to 30 minutes", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Galaxy Quest" }),
+  ).not.toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "The Good Place" }),
+  ).toBeVisible();
+  const hidden = page.waitForRequest(
+    (r) => new URL(r.url()).pathname === "/api/recommendations/feedback",
+  );
+  await page
+    .getByRole("button", { name: "Not interested", exact: true })
+    .click();
+  expect((await hidden).postDataJSON()).toEqual({
+    key: "tv:100",
+    action: "not_interested",
+  });
+  await expect(page.getByRole("status")).toContainText(
+    "hidden from your picks",
+  );
+  await expect(
+    page.getByRole("heading", { name: "Let’s widen the search" }),
+  ).toBeVisible();
+  const undone = page.waitForRequest(
+    (r) => new URL(r.url()).pathname === "/api/recommendations/feedback",
+  );
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  expect((await undone).postDataJSON()).toEqual({
+    key: "tv:100",
+    action: null,
+  });
+  await expect(
+    page.getByRole("heading", { name: "The Good Place" }),
+  ).toBeVisible();
+  const seen = page.waitForRequest(
+    (r) => new URL(r.url()).pathname === "/api/recommendations/feedback",
+  );
+  await page.getByRole("button", { name: "Already seen", exact: true }).click();
+  expect((await seen).postDataJSON().action).toBe("seen");
+});
+
+test("movie requests require a choice and recover from limits without signing out", async ({
+  page,
+}) => {
+  await fixture(page);
+  let fail = true;
+  let posts = 0;
+  await page.route("**/api/seerr/request", (route) => {
+    posts += 1;
+    return route.fulfill({
+      status: fail ? 403 : 200,
+      json: fail
+        ? { detail: "Your Seerr request limit has been reached." }
+        : { ok: true, status: "pending" },
+    });
+  });
+  await page.goto("/");
+  await navigate(page, "Discover");
+  await page
+    .getByRole("tab", { name: "Discover & request", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Your next discovery" }),
+  ).toBeVisible();
+  expect(posts).toBe(0);
+  await page
+    .getByRole("button", { name: "Request movie", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toContainText("your Seerr account");
+  expect(posts).toBe(0);
+  await page
+    .getByRole("button", { name: "Request through Seerr", exact: true })
+    .click();
+  await expect(page.getByRole("alert")).toContainText("request limit");
+  await expect(
+    page.getByRole("heading", {
+      name: "What are we watching?",
+      includeHidden: true,
+    }),
+  ).toHaveCount(1);
+  fail = false;
+  const submitted = page.waitForRequest(
+    (r) => new URL(r.url()).pathname === "/api/seerr/request",
+  );
+  await page
+    .getByRole("button", { name: "Request through Seerr", exact: true })
+    .click();
+  expect((await submitted).postDataJSON()).toEqual({
+    media_type: "movie",
+    media_id: 99,
+    seasons: [],
+  });
+  await expect(page.getByRole("dialog")).not.toBeVisible();
+  await expect(page.getByRole("status")).toContainText("Awaiting approval");
+  await expect(
+    page.getByRole("button", { name: "Request movie", exact: true }),
+  ).not.toBeVisible();
+});
+
+test("series requests select only missing seasons and handle changed availability", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.goto("/");
+  await navigate(page, "Discover");
+  await page
+    .getByRole("tab", { name: "Discover & request", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Choose seasons", exact: true })
+    .click();
+  await expect(page.getByRole("button", { name: /Season 1/ })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /Season 2/ })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await page.getByRole("button", { name: /Season 3/ }).click();
+  await page.getByRole("button", { name: /Season 2/ }).click();
+  const submitted = page.waitForRequest(
+    (r) => new URL(r.url()).pathname === "/api/seerr/request",
+  );
+  await page
+    .getByRole("button", { name: "Request through Seerr", exact: true })
+    .click();
+  expect((await submitted).postDataJSON()).toEqual({
+    media_type: "tv",
+    media_id: 100,
+    seasons: [3],
+  });
+  await expect(page.getByRole("status")).toContainText(
+    "The Good Place: Awaiting approval",
+  );
+});
+
+test("unlinked Seerr leaves library picks usable and offers a connection path", async ({
+  page,
+}) => {
+  await fixture(page);
+  await page.route("**/api/recommendations/options", (route) =>
+    route.fulfill({
+      json: {
+        viewers: [{ id: alice, name: "Alessandro" }],
+        genres: [],
+        moods: [{ value: "any", name: "Any mood" }],
+        integration: {
+          connected: true,
+          linked: false,
+          public_url: "https://seerr.test",
+          message:
+            "Sign into Seerr once with your Jellyfin account, then try again",
+          can_request_movie: false,
+          can_request_tv: false,
+        },
+      },
+    }),
+  );
+  await page.goto("/");
+  await navigate(page, "Discover");
+  await expect(
+    page.getByRole("heading", { name: "Galaxy Quest" }),
+  ).toBeVisible();
+  await page
+    .getByRole("tab", { name: "Discover & request", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Connect your Seerr account" }),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open Seerr" })).toHaveAttribute(
+    "href",
+    "https://seerr.test",
+  );
+});
+
+test("discover works across themes without overflow or accessibility errors", async ({
+  page,
+}, testInfo) => {
+  await fixture(page);
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/");
+  await navigate(page, "Discover");
+  await expect(
+    page.getByRole("heading", { name: "Galaxy Quest" }),
+  ).toBeVisible();
+  if (testInfo.project.name === "desktop")
+    await expect(page.getByRole("navigation")).toBeInViewport();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  for (const theme of themes) {
+    await page.evaluate(({ value, light }) => {
+      document.documentElement.dataset.theme = value;
+      document.documentElement.classList.toggle("dark", !light);
+    }, theme);
+    await page.evaluate(
+      () =>
+        new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        ),
+    );
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+    const result = await new AxeBuilder({ page })
+      .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+      .analyze();
+    expect(
+      result.violations.map((v) => ({
+        id: v.id,
+        nodes: v.nodes.map((n) => ({
+          target: n.target,
+          summary: n.failureSummary,
+        })),
+      })),
+    ).toEqual([]);
+    if (theme.value === "midnight" || theme.value === "lavender")
+      await page.screenshot({
+        path: `test-results/discover-${testInfo.project.name}-${theme.value}.png`,
+        fullPage: true,
+      });
+  }
+  await page
+    .getByRole("tab", { name: "Discover & request", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Choose seasons", exact: true })
+    .click();
+  expect(
+    (
+      await new AxeBuilder({ page })
+        .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+        .analyze()
+    ).violations,
+  ).toEqual([]);
+  expect(errors).toEqual([]);
 });
