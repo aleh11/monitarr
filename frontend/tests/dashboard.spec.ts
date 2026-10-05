@@ -355,8 +355,10 @@ async function fixture(page: Page, authenticated = true) {
           ...media,
           name: media.item_name,
           type: "Episode",
+          started_at: "2026-10-04T14:40:00Z",
           at: "2026-10-04T15:00:00Z",
           seconds: 1200,
+          progress: 1,
           completed: true,
           device: "TV",
           client: "Jellyfin",
@@ -787,7 +789,7 @@ test("existing workflows render and persist ratings and watchlist actions", asyn
   });
   await navigate(page, "History");
   await expect(page.getByText("20m", { exact: true })).toBeVisible();
-  await expect(page.getByText("17:00", { exact: false })).toBeVisible();
+  await expect(page.getByText("Oct 4, 16:40 – 17:00")).toBeVisible();
   await navigate(page, "System");
   await expect(page.getByText("12%", { exact: true })).toBeVisible();
 });

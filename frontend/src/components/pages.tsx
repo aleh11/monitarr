@@ -826,7 +826,10 @@ export function HistoryPage({
           <div className="panel-heading">
             <div>
               <h2>Playback sessions</h2>
-              <p>Filtered by the calendar above · latest 200 sessions</p>
+              <p>
+                Filtered by the calendar above · reconnects are joined and
+                plays under a minute are hidden
+              </p>
             </div>
             <div className="search-input">
               <Search size={17} />
@@ -882,21 +885,18 @@ export function HistoryPage({
                           <Badge
                             variant={r.completed ? "default" : "secondary"}
                           >
-                            {r.completed ? "Completed" : "Partial watch"}
+                            {r.completed
+                              ? "Completed"
+                              : r.progress != null
+                                ? `${Math.max(1, Math.round(r.progress * 100))}% watched`
+                                : "Partial watch"}
                           </Badge>
                         </TableCell>
                         <TableCell className="muted">
                           {r.device || r.client || "—"}
                         </TableCell>
                         <TableCell className="muted">
-                          {new Intl.DateTimeFormat("en", {
-                            timeZone: timezone,
-                            day: "numeric",
-                            month: "short",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            hourCycle: "h23",
-                          }).format(parseISO(r.at))}
+                          {sessionSpan(r.started_at, r.at, timezone)}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -912,6 +912,17 @@ export function HistoryPage({
       )}
     </>
   );
+}
+function sessionSpan(start: string, end: string, timeZone: string) {
+  const time = { hour: "2-digit", minute: "2-digit", hourCycle: "h23" } as const;
+  const day = new Intl.DateTimeFormat("en", { timeZone, day: "numeric", month: "short" });
+  const clock = new Intl.DateTimeFormat("en", { timeZone, ...time });
+  const from = parseISO(start);
+  const to = parseISO(end);
+  const sameDay = day.format(from) === day.format(to);
+  return `${day.format(from)}, ${clock.format(from)} – ${
+    sameDay ? "" : `${day.format(to)}, `
+  }${clock.format(to)}`;
 }
 function ReportedHistory() {
   const history = useResource<ReportedActivity[]>("/api/history");

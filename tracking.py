@@ -7,8 +7,15 @@ from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 SAMPLE_GAP_SECONDS = 45
-POLL_GAP_SECONDS = 15
+# Some clients (Swiftfin 1.6) keep a ghost player reporting a second item on the same
+# session, so the real item is only seen every other poll.
+POLL_GAP_SECONDS = 30
 RUN_GAP_SECONDS = 15
+# An unfinished playback of the same item resumes its run after reconnects or app restarts.
+RESUME_SECONDS = 30 * 60
+# History joins playbacks of the same item this close together and hides shorter ones.
+HISTORY_JOIN_SECONDS = 30 * 60
+HISTORY_MIN_SECONDS = 60
 
 
 @contextmanager
@@ -82,41 +89,53 @@ def coverage(c, run_id):
     return sum(end - start for start, end in merge_intervals([(r[0], r[1]) for r in ranges]))
 
 
+def resumable_run(c, user_id, item_id, timestamp):
+    row = c.execute("""
+        SELECT r.id FROM playback_runs r
+        LEFT JOIN verified_completions v ON v.run_id=r.id
+        WHERE r.user_id=? AND r.item_id=? AND v.run_id IS NULL
+          AND COALESCE((SELECT MAX(ended_at) FROM watch_intervals w WHERE w.run_id=r.id), r.started_at) >= ?
+        ORDER BY r.started_at DESC LIMIT 1
+    """, (user_id, item_id, timestamp - RESUME_SECONDS)).fetchone()
+    return row["id"] if row else None
+
+
 def observe(path, sessions, timestamp):
-    active = set()
+    latest = {}
+    for session in sessions:
+        item = session.get("NowPlayingItem") or {}
+        uid = normalized(session.get("UserId"))
+        iid = normalized(item.get("Id"))
+        if not session.get("Id") or not uid or not iid or item.get("Type") not in ("Movie", "Episode"):
+            continue
+        key = f"{session['Id']}:{uid}:{iid}"
+        checkin = parse_timestamp(session.get("LastPlaybackCheckIn"))
+        if key not in latest or (checkin or 0) > (latest[key][1] or 0):
+            latest[key] = (session, checkin, uid, iid)
     with connect(path) as c:
-        for session in sessions:
-            item = session.get("NowPlayingItem") or {}
+        for key, (session, checkin, uid, iid) in latest.items():
+            item = session["NowPlayingItem"]
             state = session.get("PlayState") or {}
-            uid = normalized(session.get("UserId"))
-            if not session.get("Id") or not uid or item.get("Type") not in ("Movie", "Episode"):
-                continue
-            iid = normalized(item.get("Id"))
-            if not iid:
-                continue
-            key = str(session["Id"]) + ":" + uid
-            active.add(key)
             position = max(0, (state.get("PositionTicks") or 0) / 10_000_000)
             runtime = max(0, (item.get("RunTimeTicks") or 0) / 10_000_000)
             position = min(position, runtime) if runtime else position
-            checkin = parse_timestamp(session.get("LastPlaybackCheckIn"))
             fresh = checkin is not None and -5 <= timestamp - checkin <= 30
             current = {"item_id": iid, "position": position, "paused": bool(state.get("IsPaused")),
                        "fresh": fresh, "playlist_id": session.get("PlaylistItemId"), "last_observed_at": timestamp}
             previous = c.execute("SELECT * FROM playback_snapshots WHERE session_key=?", (key,)).fetchone()
             previous_data = json.loads(previous["payload"]) if previous else None
-            same = previous_data and previous_data["item_id"] == iid
+            same = previous_data is not None
             if same and current["playlist_id"] and previous_data.get("playlist_id"):
                 same = current["playlist_id"] == previous_data["playlist_id"]
             if same:
                 completed = c.execute("SELECT 1 FROM verified_completions WHERE run_id=?", (previous["run_id"],)).fetchone()
                 if completed and position <= 5 and previous_data["position"] > 30:
                     same = False
+            uninterrupted = same and timestamp - previous_data["last_observed_at"] <= POLL_GAP_SECONDS
             if same:
                 run_id = previous["run_id"]
                 elapsed = timestamp - previous["observed_at"]
                 delta = position - previous_data["position"]
-                uninterrupted = timestamp - previous_data.get("last_observed_at", previous["observed_at"]) <= POLL_GAP_SECONDS
                 if (0 < elapsed <= SAMPLE_GAP_SECONDS and 0 < delta <= elapsed * 1.5 + 1
                         and uninterrupted and fresh and previous_data["fresh"]
                         and not current["paused"] and not previous_data["paused"]):
@@ -127,11 +146,13 @@ def observe(path, sessions, timestamp):
                     if not completed and runtime > 0 and coverage(c, run_id) >= runtime * 0.9:
                         c.execute("INSERT OR IGNORE INTO verified_completions VALUES (?,?)", (run_id, timestamp))
             else:
-                run_id = uuid.uuid4().hex
-                c.execute("INSERT INTO playback_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (
-                    run_id, uid, session.get("UserName") or "Unknown viewer", iid, item["Type"],
-                    item.get("Name") or "Untitled", item.get("SeriesName"), normalized(item.get("SeriesId")),
-                    runtime, session.get("Client"), session.get("DeviceName"), timestamp))
+                run_id = resumable_run(c, uid, iid, timestamp)
+                if run_id is None:
+                    run_id = uuid.uuid4().hex
+                    c.execute("INSERT INTO playback_runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (
+                        run_id, uid, session.get("UserName") or "Unknown viewer", iid, item["Type"],
+                        item.get("Name") or "Untitled", item.get("SeriesName"), normalized(item.get("SeriesId")),
+                        runtime, session.get("Client"), session.get("DeviceName"), timestamp))
             anchor = timestamp
             if (same and position == previous_data["position"] and fresh and previous_data["fresh"]
                     and not current["paused"] and not previous_data["paused"] and uninterrupted
@@ -139,10 +160,11 @@ def observe(path, sessions, timestamp):
                 anchor = previous["observed_at"]
             c.execute("INSERT OR REPLACE INTO playback_snapshots VALUES (?,?,?,?)",
                       (key, run_id, anchor, json.dumps(current)))
-        keys = [r[0] for r in c.execute("SELECT session_key FROM playback_snapshots")]
-        for key in keys:
-            if key not in active:
-                c.execute("DELETE FROM playback_snapshots WHERE session_key=?", (key,))
+        # Keep briefly unseen snapshots so an item that flickers out of the session list keeps its run.
+        for row in c.execute("SELECT session_key, observed_at, payload FROM playback_snapshots").fetchall():
+            seen = json.loads(row["payload"]).get("last_observed_at", row["observed_at"])
+            if row["session_key"] not in latest and timestamp - seen > SAMPLE_GAP_SECONDS:
+                c.execute("DELETE FROM playback_snapshots WHERE session_key=?", (row["session_key"],))
         c.execute("INSERT OR REPLACE INTO tracking_metadata VALUES ('last_sample', ?)", (str(timestamp),))
 
 
@@ -283,17 +305,42 @@ def activity(path, start=None, end=None, tz="UTC", now=None):
     first, last, zone, lower, upper = date_window(start, end, tz, now)
     with connect(path) as c:
         rows = c.execute("""
-            SELECT r.*, w.started_at AS interval_start, w.ended_at AS interval_end, v.completed_at FROM watch_intervals w
+            SELECT r.*, w.started_at AS interval_start, w.ended_at AS interval_end,
+                   w.position_start, w.position_end, v.completed_at FROM watch_intervals w
             JOIN playback_runs r ON r.id=w.run_id
             LEFT JOIN verified_completions v ON v.run_id=r.id
-            WHERE w.started_at < ? AND w.ended_at > ? ORDER BY w.started_at DESC
+            WHERE w.started_at < ? AND w.ended_at > ? ORDER BY w.started_at
         """, (upper, lower)).fetchall()
     runs = {}
     for row in rows:
-        run = runs.setdefault(row["id"], {"id": row["id"], "user_id": row["user_id"], "user": row["user_name"],
-                           "item_id": row["item_id"], "series_id": row["series_id"], "name": row["item_name"],
-                           "series_name": row["series_name"], "type": row["item_type"], "device": row["device"],
-                           "client": row["client"], "at": iso(min(upper, row["interval_end"])), "seconds": 0,
-                           "completed": row["completed_at"] is not None and lower <= row["completed_at"] < upper})
+        run = runs.setdefault(row["id"], {
+            "id": row["id"], "user_id": row["user_id"], "user": row["user_name"], "item_id": row["item_id"],
+            "series_id": row["series_id"], "name": row["item_name"], "series_name": row["series_name"],
+            "type": row["item_type"], "device": row["device"], "client": row["client"], "runtime": row["runtime_s"],
+            "start": max(lower, row["interval_start"]), "end": 0, "seconds": 0, "positions": [],
+            "completed": row["completed_at"] is not None and lower <= row["completed_at"] < upper})
+        run["end"] = max(run["end"], min(upper, row["interval_end"]))
         run["seconds"] += min(upper, row["interval_end"]) - max(lower, row["interval_start"])
-    return [{**r, "seconds": round(r["seconds"], 2)} for r in list(runs.values())[:200]]
+        run["positions"].append((row["position_start"], row["position_end"]))
+    # Join fragments of one viewing (reconnects, app restarts, older tracker runs) into one entry.
+    entries, open_entries = [], {}
+    for run in sorted(runs.values(), key=lambda r: r["start"]):
+        key = (run["user_id"], run["item_id"])
+        entry = open_entries.get(key)
+        if entry and not entry["completed"] and run["start"] - entry["end"] <= HISTORY_JOIN_SECONDS:
+            entry["end"] = max(entry["end"], run["end"])
+            entry["seconds"] += run["seconds"]
+            entry["positions"] += run["positions"]
+            entry["completed"] = run["completed"]
+        else:
+            entry = open_entries[key] = dict(run)
+            entries.append(entry)
+    history = []
+    for entry in sorted(entries, key=lambda r: -r["end"]):
+        if entry["seconds"] < HISTORY_MIN_SECONDS and not entry["completed"]:
+            continue
+        covered = sum(b - a for a, b in merge_intervals(entry.pop("positions")))
+        runtime, started, ended = entry.pop("runtime"), entry.pop("start"), entry.pop("end")
+        history.append({**entry, "started_at": iso(started), "at": iso(ended), "seconds": round(entry["seconds"], 2),
+                        "progress": round(min(1, covered / runtime), 3) if runtime else None})
+    return history[:200]

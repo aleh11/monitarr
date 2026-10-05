@@ -218,3 +218,49 @@ def test_breakdown_reconciles_concurrent_movies_and_episodes(database):
     board = report(database)
     assert board["breakdown"] == {"Movie": 2700, "Episode": 2700}
     assert sum(board["breakdown"].values()) == board["totals"]["seconds"]
+
+
+def test_ghost_item_flickering_on_one_session_keeps_the_real_run(database):
+    # Swiftfin 1.6 can keep reporting a stale second item on the same session, so the
+    # session's now-playing item alternates between the real episode and a ghost at 0.
+    at = stamp("2026-10-04T12:00:00Z")
+    for elapsed in range(0, 101, 5):
+        if elapsed % 10:
+            tracking.observe(database, [session(at + elapsed, 0, item="ghost")], at + elapsed)
+        else:
+            tracking.observe(database, [session(at + elapsed, elapsed)], at + elapsed)
+    board = report(database)
+    assert board["totals"]["seconds"] == 100
+    assert board["totals"]["episodes"] == 1
+    with tracking.connect(database) as c:
+        assert c.execute("SELECT COUNT(*) FROM playback_runs").fetchone()[0] == 2
+    rows = tracking.activity(database, "2026-10-04", "2026-10-04")
+    assert [r["name"] for r in rows] == ["Rick and Morty"]
+
+
+def test_reconnect_with_new_session_resumes_and_completes_the_same_run(database):
+    at = stamp("2026-10-04T12:00:00Z")
+    for position in range(0, 51, 5):
+        tracking.observe(database, [session(at + position, position, sid="old")], at + position)
+    tracking.observe(database, [], at + 60)
+    for i, position in enumerate(range(50, 101, 5)):
+        tracking.observe(database, [session(at + 300 + i * 5, position, sid="new")], at + 300 + i * 5)
+    board = report(database)
+    assert board["totals"]["seconds"] == 100
+    assert board["totals"]["episodes"] == 1
+    with tracking.connect(database) as c:
+        assert c.execute("SELECT COUNT(*) FROM playback_runs").fetchone()[0] == 1
+
+
+def test_history_joins_fragments_and_hides_noise(database):
+    at = stamp("2026-10-04T12:00:00Z")
+    insert_run(database, "alice", [(at, at + 400)])
+    insert_run(database, "alice", [(at + 600, at + 900)])
+    insert_run(database, "alice", [(at + 1000, at + 1010)])
+    insert_run(database, "bob", [(at + 50, at + 70)])
+    rows = tracking.activity(database, "2026-10-04", "2026-10-04")
+    assert len(rows) == 1
+    assert rows[0]["seconds"] == 710
+    assert rows[0]["started_at"] == tracking.iso(at)
+    assert rows[0]["at"] == tracking.iso(at + 1010)
+    assert rows[0]["completed"] is False

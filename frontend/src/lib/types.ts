@@ -177,8 +177,10 @@ export type Activity = {
   series_name?: string;
   type: string;
   name: string;
+  started_at: string;
   at: string;
   seconds: number;
+  progress: number | null;
   completed: boolean;
   device: string;
   client: string;

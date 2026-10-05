@@ -13,7 +13,6 @@ import {
   Star,
   Sun,
   Trophy,
-  Tv,
   X,
 } from "lucide-react";
 import { api, ApiError, post, useResource } from "@/lib/api";
@@ -218,7 +217,16 @@ function Brand() {
   return (
     <span className="brand">
       <span className="brand-symbol">
-        <Tv size={21} strokeWidth={1.9} />
+        <svg viewBox="8 14 48 34" width="22" height="16" aria-hidden="true">
+          <path
+            d="M8 38h6.5l7.5-19 10 25 10-25 6 19"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="5.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
       </span>
       monitor<span className="brand-dot">.</span>
     </span>
