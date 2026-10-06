@@ -1072,70 +1072,39 @@ export function SystemPage() {
                 ))}
               </div>
             </section>
-            <div className="system-grid">
-              <section className="panel">
-                <div className="panel-heading">
-                  <div>
-                    <h2>Containers</h2>
+            <section className="panel">
+              <div className="panel-heading">
+                <div>
+                  <h2>On the way</h2>
+                  <p>Sonarr & Radarr download queue</p>
+                </div>
+              </div>
+              {data.queue.length ? (
+                data.queue.map((q, i) => (
+                  <div className="download-row" key={`${q.title}-${i}`}>
+                    <Badge
+                      variant={
+                        q.warning || q.status === "error"
+                          ? "destructive"
+                          : "secondary"
+                      }
+                    >
+                      {q.app}
+                    </Badge>
+                    <strong>{q.title}</strong>
                     <p>
-                      {
-                        data.containers.filter((c) => c.state === "running")
-                          .length
-                      }{" "}
-                      of {data.containers.length} running
+                      {q.status}
+                      {q.timeleft ? ` · ${q.timeleft} left` : ""}
                     </p>
+                    {q.progress != null && <Progress value={q.progress} />}
                   </div>
-                </div>
-                {data.containers.length ? (
-                  data.containers.map((c) => (
-                    <div className="container-row" key={c.name}>
-                      <span
-                        className={`status-dot ${c.state !== "running" || /unhealthy/.test(c.status) ? "status-warn" : ""}`}
-                      />
-                      <strong>{c.name}</strong>
-                      <span>{c.status}</span>
-                    </div>
-                  ))
-                ) : (
-                  <Empty title="Container status unavailable">
-                    Check the Docker proxy connection.
-                  </Empty>
-                )}
-              </section>
-              <section className="panel">
-                <div className="panel-heading">
-                  <div>
-                    <h2>On the way</h2>
-                    <p>Sonarr & Radarr download queue</p>
-                  </div>
-                </div>
-                {data.queue.length ? (
-                  data.queue.map((q, i) => (
-                    <div className="download-row" key={`${q.title}-${i}`}>
-                      <Badge
-                        variant={
-                          q.warning || q.status === "error"
-                            ? "destructive"
-                            : "secondary"
-                        }
-                      >
-                        {q.app}
-                      </Badge>
-                      <strong>{q.title}</strong>
-                      <p>
-                        {q.status}
-                        {q.timeleft ? ` · ${q.timeleft} left` : ""}
-                      </p>
-                      {q.progress != null && <Progress value={q.progress} />}
-                    </div>
-                  ))
-                ) : (
-                  <Empty title="All downloaded">
-                    Your download queue is clear.
-                  </Empty>
-                )}
-              </section>
-            </div>
+                ))
+              ) : (
+                <Empty title="All downloaded">
+                  Your download queue is clear.
+                </Empty>
+              )}
+            </section>
           </>
         )
       )}

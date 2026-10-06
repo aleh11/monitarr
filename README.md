@@ -171,7 +171,6 @@ server. The local checks cannot verify a production client's reporting cadence.
 | `SESSION_SECRET` | Required random signing secret for login cookies |
 | `JELLYFIN_URL` | Defaults to `http://jellyfin:8096` |
 | `SONARR_API_KEY`, `RADARR_API_KEY` | Optional download queue connections |
-| `DOCKER_URL` | Defaults to `http://docker-proxy:2375` |
 | `DISKS` | Filesystems to report, `Label=/path,…` |
 | `DB_PATH` | Defaults to `/data/monitarr.db`; must persist across containers |
 | `SEERR_URL` | Internal Seerr address, defaults to `http://seerr:5055` |

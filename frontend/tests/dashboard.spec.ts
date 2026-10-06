@@ -382,9 +382,6 @@ async function fixture(page: Page, authenticated = true) {
         memory: { total: 16e9, available: 10e9 },
         uptime: 864000,
         temps: { CPU: 40 },
-        containers: [
-          { name: "jellyfin", state: "running", status: "Up 10 days" },
-        ],
         queue: [],
         library: { MovieCount: 210, SeriesCount: 45, EpisodeCount: 1900 },
       };

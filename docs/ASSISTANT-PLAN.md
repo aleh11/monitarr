@@ -43,8 +43,10 @@ running on the box from claude.ai or the mobile app. It's useful until this exis
 Both are on the same site (`*.{$DOMAIN}`), so Portainer's login survives inside the frame. With IP:port access
 (no Caddy), only the `--no-csp` route works.
 
-**Native alternative:** Monitarr already lists containers through `docker-proxy`. Adding logs (`CONTAINERS=1` already
-allows `GET /containers/{id}/logs`) is free. Restart buttons would need `POST=1` on the proxy, and that
+**Status:** done. The admin-only Containers tab embeds Portainer, and the System tab's own container list was removed.
+
+**Native alternative (not built):** a logs viewer through `docker-proxy` (`CONTAINERS=1` already allows
+`GET /containers/{id}/logs`) would be free. Restart buttons would need `POST=1` on the proxy, and that
 should go through the same approval flow as the chat rather than becoming a bare button.
 
 ## Order, if we pick this up

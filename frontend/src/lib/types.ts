@@ -209,7 +209,6 @@ export type System = {
   memory: { total: number; available: number };
   uptime: number;
   temps: Record<string, number>;
-  containers: { name: string; state: string; status: string }[];
   queue: {
     app: string;
     title: string;

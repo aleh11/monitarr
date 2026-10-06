@@ -23,7 +23,6 @@ JF_URL = os.environ.get("JELLYFIN_URL", "http://jellyfin:8096").rstrip("/")
 JF_KEY = os.environ["JELLYFIN_API_KEY"]
 SONARR_KEY = os.environ.get("SONARR_API_KEY", "")
 RADARR_KEY = os.environ.get("RADARR_API_KEY", "")
-DOCKER_URL = os.environ.get("DOCKER_URL", "http://docker-proxy:2375")
 SECRET = os.environ["SESSION_SECRET"]
 DB_PATH = os.environ.get("DB_PATH", "/data/monitarr.db")
 # One-time migration from the app's previous name (monitor → monitarr)
@@ -721,12 +720,6 @@ async def system(user=Depends(current_user)):
     disks = disk_usage()
     for d in disks:
         d["days_to_full"] = days_to_full(d["label"], d["free"])
-    try:
-        r = await http.get(f"{DOCKER_URL}/containers/json", params={"all": "true"})
-        containers = sorted(({"name": c["Names"][0].lstrip("/"), "state": c["State"], "status": c["Status"]}
-                             for c in r.json()), key=lambda c: c["name"])
-    except (httpx.HTTPError, ValueError):
-        containers = []
     queue = (await arr_queue("Sonarr", "http://sonarr:8989", SONARR_KEY)
              + await arr_queue("Radarr", "http://radarr:7878", RADARR_KEY))
     with open("/proc/loadavg") as f:
@@ -735,7 +728,7 @@ async def system(user=Depends(current_user)):
         uptime = float(f.read().split()[0])
     counts = (await jf.get("/Items/Counts")).json()
     return {"disks": disks, "cpu": cpu_state["pct"], "cores": os.cpu_count(), "load": load,
-            "memory": meminfo(), "uptime": uptime, "temps": temps(), "containers": containers,
+            "memory": meminfo(), "uptime": uptime, "temps": temps(),
             "queue": queue, "library": {k: counts.get(k) for k in ("MovieCount", "SeriesCount", "EpisodeCount")}}
 
 

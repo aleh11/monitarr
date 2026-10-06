@@ -1736,22 +1736,6 @@ h2 {
   color: var(--muted-foreground);
   margin-top: 10px;
 }
-.container-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border-top: 1px solid var(--border);
-  padding: 15px 0;
-}
-.container-row strong {
-  font-size: 11px;
-  font-weight: 550;
-  flex: 1;
-}
-.container-row > span:last-child {
-  color: var(--muted-foreground);
-  font-size: 11px;
-}
 .download-row {
   border-top: 1px solid var(--border);
   padding: 18px 0;
