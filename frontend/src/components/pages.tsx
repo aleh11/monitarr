@@ -1142,3 +1142,34 @@ export function SystemPage() {
     </>
   );
 }
+
+/** Portainer lives next to monitarr: portainer.<domain> behind Caddy, or <host>:9000 with IP:port access. */
+export function portainerUrl(loc: Pick<Location, "protocol" | "hostname"> = window.location) {
+  const host = loc.hostname;
+  if (host.startsWith("monitarr."))
+    return `${loc.protocol}//portainer.${host.slice("monitarr.".length)}/`;
+  return `${loc.protocol}//${host}:9000/`;
+}
+
+export function ContainersPage() {
+  const url = portainerUrl();
+  return (
+    <>
+      <PageIntro
+        heading="Under the hood."
+        description="Portainer, for when a container needs a closer look."
+      />
+      <p className="containers-open">
+        <a href={url} target="_blank" rel="noreferrer">
+          Open Portainer in a new tab
+        </a>
+      </p>
+      <iframe
+        className="containers-frame"
+        src={url}
+        title="Portainer"
+        style={{ width: "100%", height: "calc(100vh - 260px)", minHeight: 480, border: 0, borderRadius: 12 }}
+      />
+    </>
+  );
+}

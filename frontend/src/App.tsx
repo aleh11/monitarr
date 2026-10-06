@@ -1,6 +1,7 @@
 import { Suspense, lazy, useEffect, useState, type FormEvent } from "react";
 import {
   Activity,
+  Boxes,
   Compass,
   ArrowUpRight,
   History,
@@ -56,6 +57,7 @@ import {
   NowPage,
   RatingsPage,
   SystemPage,
+  ContainersPage,
   WatchPage,
 } from "@/components/pages";
 
@@ -67,6 +69,7 @@ const nav = [
   { id: "ratings", name: "Ratings", icon: Star },
   { id: "history", name: "History", icon: History },
   { id: "system", name: "System", icon: Activity },
+  { id: "containers", name: "Containers", icon: Boxes, adminOnly: true },
 ] as const;
 export type Tab = (typeof nav)[number]["id"];
 function stored(key: string, fallback: string) {
@@ -410,7 +413,7 @@ function Dashboard({
         </div>
         <div className="sidebar-caption">Your nights in, together.</div>
         <nav aria-label="Main navigation">
-          {nav.map((n) => (
+          {nav.filter((n) => !("adminOnly" in n) || user.admin).map((n) => (
             <button
               className={tab === n.id ? "active" : ""}
               key={n.id}
@@ -534,6 +537,7 @@ function Dashboard({
             <HistoryPage query={query} timezone={timezone} />
           )}
           {tab === "system" && <SystemPage />}
+          {tab === "containers" && user.admin && <ContainersPage />}
         </main>
         <footer className="app-footer">
           <span>monitarr.</span>

@@ -1177,3 +1177,16 @@ test("discover works across themes without overflow or accessibility errors", as
   ).toEqual([]);
   expect(errors).toEqual([]);
 });
+
+test("admins get a Containers tab that embeds Portainer", async ({ page }) => {
+  await fixture(page);
+  await page.route("http://127.0.0.1:9000/**", (route) =>
+    route.fulfill({ contentType: "text/html", body: "<title>Portainer</title><p>portainer</p>" }),
+  );
+  await page.goto("/");
+  await navigate(page, "Containers");
+  const frame = page.getByTitle("Portainer");
+  await expect(frame).toHaveAttribute("src", "http://127.0.0.1:9000/");
+  await expect(page.frameLocator('iframe[title="Portainer"]').getByText("portainer")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open Portainer in a new tab" })).toHaveAttribute("target", "_blank");
+});
