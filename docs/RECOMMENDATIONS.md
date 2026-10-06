@@ -47,7 +47,7 @@ What are we watching?
 [alternative] [alternative] [alternative]
 ```
 
-Review: retain Monitor's established theme identity rather than introduce a
+Review: retain Monitarr's established theme identity rather than introduce a
 second palette. Avoid scores that look like predicted ratings. Use one featured
 title and quieter alternatives so this reads as a viewing decision, not another
 analytics dashboard. Unknown runtimes cannot satisfy a selected time limit.
@@ -61,12 +61,12 @@ history, explain that picks use filters and catalogue popularity. Recommendation
 use a bounded candidate pool and do not promise exhaustive library search.
 
 Deployment reads the existing Seerr configuration on the media server and saves
-only the integration key and public service URLs into Monitor's private data
+only the integration key and public service URLs into Monitarr's private data
 directory, owned by its runtime user with mode 0600. No secrets enter source,
 browser responses or job logs. Environment variables can override this file.
 If Seerr is unavailable or unconfigured, local recommendations remain usable
 and the screen gives a clear connection message. Existing accounts must first
-sign into Seerr with Jellyfin; Monitor does not silently create accounts.
+sign into Seerr with Jellyfin; Monitarr does not silently create accounts.
 
 Sources: https://docs.seerr.dev/api/create-new-request/ and the official Seerr
 API schema and authentication middleware in https://github.com/seerr-team/seerr.

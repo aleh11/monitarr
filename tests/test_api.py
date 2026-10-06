@@ -11,9 +11,9 @@ import tracking
 def application(monkeypatch, tmp_path):
     monkeypatch.setenv("JELLYFIN_API_KEY", "test-key")
     monkeypatch.setenv("SESSION_SECRET", "test-secret")
-    monkeypatch.setenv("DB_PATH", str(tmp_path / "monitor.db"))
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "monitarr.db"))
     module = importlib.import_module("app")
-    monkeypatch.setattr(module, "DB_PATH", str(tmp_path / "monitor.db"))
+    monkeypatch.setattr(module, "DB_PATH", str(tmp_path / "monitarr.db"))
     module.init_db()
     tracking.initialize(module.DB_PATH)
     return module

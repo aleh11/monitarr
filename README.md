@@ -1,4 +1,4 @@
-# monitor
+# monitarr
 
 A React dashboard for your Jellyfin circle: now playing, a shared watchlist,
 ratings, measured viewing analytics, playback history and media-server health.
@@ -68,13 +68,13 @@ Profile pictures sync from Jellyfin across the account area, leaderboards, now
 playing, reviews and history. Click your account picture to preview, upload or
 remove your own picture. Changes also update Jellyfin and respect its current
 user preference policy. Uploads accept JPEG, PNG and WebP up to 5 MB and 16
-megapixels; Monitor corrects orientation, crops a 512-pixel square and strips
-metadata before saving. Pictures are proxied through the signed Monitor session,
+megapixels; Monitarr corrects orientation, crops a 512-pixel square and strips
+metadata before saving. Pictures are proxied through the signed Monitarr session,
 and missing or unavailable pictures fall back to initials.
 
 ### How measurement works
 
-Monitor samples Jellyfin sessions every five seconds and stores evidence of
+Monitarr samples Jellyfin sessions every five seconds and stores evidence of
 forward playback progress in SQLite. It does **not** credit a full runtime or
 use PlayCount changes. Bulk marking a season watched never creates viewing.
 Pauses, seeks, stale clients, failed requests and restart gaps get no invented
@@ -154,8 +154,8 @@ WCAG accessibility checks. They do not access your live Jellyfin accounts.
 
 Docker builds the frontend in a Node stage and copies its output into the Python
 image. A PR runs backend, production frontend/browser and container-build checks.
-Merging to `main` builds `ghcr.io/aleh11/monitor`, then the self-hosted media-server
-runner restarts Monitor in the `media-stack` compose project. Main's deploy build
+Merging to `main` builds `ghcr.io/aleh11/monitarr`, then the self-hosted media-server
+runner restarts Monitarr in the `media-stack` compose project. Main's deploy build
 also runs the backend regressions before publishing.
 
 After deployment, play one episode, pause, resume and seek; verify that only
@@ -173,7 +173,7 @@ server. The local checks cannot verify a production client's reporting cadence.
 | `SONARR_API_KEY`, `RADARR_API_KEY` | Optional download queue connections |
 | `DOCKER_URL` | Defaults to `http://docker-proxy:2375` |
 | `DISKS` | Filesystems to report, `Label=/path,…` |
-| `DB_PATH` | Defaults to `/data/monitor.db`; must persist across containers |
+| `DB_PATH` | Defaults to `/data/monitarr.db`; must persist across containers |
 | `SEERR_URL` | Internal Seerr address, defaults to `http://seerr:5055` |
 | `SEERR_API_KEY` | Optional override of the server's private Seerr connection key |
 | `SEERR_PUBLIC_URL` | Public browser address for Seerr links |

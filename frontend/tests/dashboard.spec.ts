@@ -427,7 +427,7 @@ test("leaderboard metric, range, timezone and theme selections work", async ({
   await page.getByRole("combobox", { name: "Timezone" }).click();
   await page.getByRole("option", { name: "UTC", exact: true }).click();
   await expect
-    .poll(() => page.evaluate(() => localStorage.getItem("monitor:timezone")))
+    .poll(() => page.evaluate(() => localStorage.getItem("monitarr:timezone")))
     .toBe("UTC");
   await page.getByRole("combobox", { name: "Chart viewer" }).click();
   await page.getByRole("option", { name: "Alessandro", exact: true }).click();

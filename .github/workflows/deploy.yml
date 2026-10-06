@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  IMAGE: ghcr.io/${{ github.repository_owner }}/monitor
+  IMAGE: ghcr.io/${{ github.repository_owner }}/monitarr
 
 jobs:
   validate:
@@ -69,18 +69,18 @@ jobs:
         env:
           DEPLOY_SHA: ${{ github.sha }}
         run: python3 scripts/connect_seerr.py
-      - name: Restart monitor
+      - name: Restart monitarr
         working-directory: /opt/media-stack
-        run: docker compose up -d --no-deps monitor
+        run: docker compose up -d --no-deps monitarr
       - name: Wait for healthy
         run: |
           for i in $(seq 1 30); do
-            s=$(docker inspect -f '{{.State.Health.Status}}' monitor)
+            s=$(docker inspect -f '{{.State.Health.Status}}' monitarr)
             echo "health: $s"
             [ "$s" = healthy ] && exit 0
             sleep 3
           done
-          docker logs --tail 50 monitor
+          docker logs --tail 50 monitarr
           exit 1
       - name: Verify live discovery connections without submitting requests
         run: python3 scripts/check_discovery.py

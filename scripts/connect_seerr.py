@@ -8,15 +8,24 @@ def container(name):
     return json.loads(subprocess.check_output(["docker", "inspect", name], text=True))[0]
 
 
+def data_dir():
+    """monitarr's /data on the host: from the container, or (first deploy, no container yet) from compose."""
+    try:
+        return next(m["Source"] for m in container("monitarr")["Mounts"] if m["Destination"] == "/data")
+    except subprocess.CalledProcessError:
+        stack = os.environ.get("MEDIA_STACK_DIR", "/opt/media-stack")
+        cfg = json.loads(subprocess.check_output(["docker", "compose", "config", "--format", "json"], cwd=stack, text=True))
+        return next(v["source"] for v in cfg["services"]["monitarr"]["volumes"] if v["target"] == "/data")
+
+
 def setup():
-    monitor = container("monitor")
     seerr = container("seerr")
-    data_path = next(m["Source"] for m in monitor["Mounts"] if m["Destination"] == "/data")
+    data_path = data_dir()
     source_path = next(m["Source"] for m in seerr["Mounts"] if m["Destination"] == "/app/config")
     environment = dict(value.split("=", 1) for value in container("caddy")["Config"]["Env"] if "=" in value)
     domain = environment.get("DOMAIN", "")
-    command = " ".join(container("caddy")["Config"].get("Cmd") or [])
-    scheme = "http" if "Caddyfile.http" in command else "https"
+    # the generated Caddyfile only gets a Cloudflare token in HTTPS mode
+    scheme = "https" if environment.get("CLOUDFLARE_API_TOKEN") else "http"
     public_url = f"{scheme}://seerr.{domain}" if domain else ""
     jellyfin_url = f"{scheme}://jellyfin.{domain}" if domain else ""
     script = """
@@ -25,7 +34,7 @@ from pathlib import Path
 settings = json.loads(Path('/run/seerr/settings.json').read_text())
 key = settings.get('main', {}).get('apiKey')
 if not key:
-    raise SystemExit('Seerr has no integration key. Complete Seerr setup and redeploy Monitor.')
+    raise SystemExit('Seerr has no integration key. Complete Seerr setup and redeploy Monitarr.')
 connection = {'url': 'http://seerr:5055', 'key': key,
               'public_url': settings.get('main', {}).get('applicationUrl') or os.environ['PUBLIC_SEERR'],
               'jellyfin_url': settings.get('jellyfin', {}).get('externalHostname') or os.environ['PUBLIC_JELLYFIN']}

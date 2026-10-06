@@ -21,7 +21,7 @@ export async function api<T>(
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     if (response.status === 401 && path !== "/api/login")
-      window.dispatchEvent(new Event("monitor:unauthorized"));
+      window.dispatchEvent(new Event("monitarr:unauthorized"));
     throw new ApiError(
       typeof data.detail === "string"
         ? data.detail

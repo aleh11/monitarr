@@ -1,4 +1,4 @@
-# Monitor: React and measured viewing
+# Monitarr: React and measured viewing
 
 ## Problem and goals
 

@@ -40,4 +40,4 @@ asyncio.run(check())
 
 
 if __name__ == "__main__":
-    subprocess.run(["docker", "exec", "-i", "monitor", "python"], input=code, text=True, check=True)
+    subprocess.run(["docker", "exec", "-i", "monitarr", "python"], input=code, text=True, check=True)

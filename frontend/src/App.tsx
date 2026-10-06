@@ -71,7 +71,8 @@ const nav = [
 export type Tab = (typeof nav)[number]["id"];
 function stored(key: string, fallback: string) {
   try {
-    return localStorage.getItem(key) || fallback;
+    // keys were "monitor:*" before the rename to monitarr
+    return localStorage.getItem(key) || localStorage.getItem(key.replace(/^monitarr:/, "monitor:")) || fallback;
   } catch {
     return fallback;
   }
@@ -86,7 +87,7 @@ function save(key: string, value: string) {
 
 export default function App() {
   const [theme, setTheme] = useState<Theme>(() => {
-    const value = stored("monitor:theme", "midnight");
+    const value = stored("monitarr:theme", "midnight");
     return value === "system" || themes.some((option) => option.value === value)
       ? (value as Theme)
       : "midnight";
@@ -114,7 +115,7 @@ export default function App() {
         );
     };
     update();
-    save("monitor:theme", theme);
+    save("monitarr:theme", theme);
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, [theme]);
@@ -126,16 +127,16 @@ export default function App() {
       if (e instanceof ApiError && e.status === 401) setUser(null);
       else
         setError(
-          e instanceof Error ? e.message : "Unable to connect to Monitor",
+          e instanceof Error ? e.message : "Unable to connect to Monitarr",
         );
     }
   }
   useEffect(() => {
     void boot();
     const unauthorized = () => setUser(null);
-    window.addEventListener("monitor:unauthorized", unauthorized);
+    window.addEventListener("monitarr:unauthorized", unauthorized);
     return () =>
-      window.removeEventListener("monitor:unauthorized", unauthorized);
+      window.removeEventListener("monitarr:unauthorized", unauthorized);
   }, []);
   const themeOptions = (
     <Select value={theme} onValueChange={(value) => setTheme(value as Theme)}>
@@ -228,7 +229,7 @@ function Brand() {
           />
         </svg>
       </span>
-      monitor<span className="brand-dot">.</span>
+      monitarr<span className="brand-dot">.</span>
     </span>
   );
 }
@@ -336,7 +337,7 @@ function Dashboard({
   onTheme: () => void;
 }) {
   const [tab, setTab] = useState<Tab>(() => {
-    const saved = stored("monitor:tab", "board");
+    const saved = stored("monitarr:tab", "board");
     return nav.some((n) => n.id === saved) ? (saved as Tab) : "board";
   });
   const [mobileNav, setMobileNav] = useState(false);
@@ -355,7 +356,7 @@ function Dashboard({
     };
   }, [mobileNav]);
   const [timezone, setTimezone] = useState(() => {
-    const zone = stored("monitor:timezone", browserTimezone);
+    const zone = stored("monitarr:timezone", browserTimezone);
     try {
       new Intl.DateTimeFormat("en", { timeZone: zone });
       return zone;
@@ -370,12 +371,12 @@ function Dashboard({
   const analytics = useResource<Analytics>(`/api/analytics?${query}`, 15000);
   function changeTab(value: Tab) {
     setTab(value);
-    save("monitor:tab", value);
+    save("monitarr:tab", value);
     setMobileNav(false);
   }
   function changeTimezone(value: string) {
     setTimezone(value);
-    save("monitor:timezone", value);
+    save("monitarr:timezone", value);
   }
   async function logout() {
     setLoggingOut(true);
@@ -535,7 +536,7 @@ function Dashboard({
           {tab === "system" && <SystemPage />}
         </main>
         <footer className="app-footer">
-          <span>monitor.</span>
+          <span>monitarr.</span>
           <span>For the love of a good night in.</span>
         </footer>
       </div>

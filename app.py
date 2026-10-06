@@ -25,16 +25,21 @@ SONARR_KEY = os.environ.get("SONARR_API_KEY", "")
 RADARR_KEY = os.environ.get("RADARR_API_KEY", "")
 DOCKER_URL = os.environ.get("DOCKER_URL", "http://docker-proxy:2375")
 SECRET = os.environ["SESSION_SECRET"]
-DB_PATH = os.environ.get("DB_PATH", "/data/monitor.db")
+DB_PATH = os.environ.get("DB_PATH", "/data/monitarr.db")
+# One-time migration from the app's previous name (monitor → monitarr)
+if "DB_PATH" not in os.environ and not os.path.exists(DB_PATH) and os.path.exists("/data/monitor.db"):
+    for suffix in ("-wal", "-shm", ""):  # SQLite side files first, so the DB never appears without them
+        if os.path.exists("/data/monitor.db" + suffix):
+            os.rename("/data/monitor.db" + suffix, DB_PATH + suffix)
 # label=path pairs; statvfs on a path reports the filesystem it lives on
 DISKS = [d.split("=", 1) for d in os.environ.get("DISKS", "NVMe=/data").split(",") if "=" in d]
 POLL_SECONDS = 5
 tracking_health = {"error": None}
-COOKIE = "monitor_session"
+COOKIE = "monitor_session"  # pre-rename name, kept so existing logins stay valid
 SESSION_DAYS = 30
 
 STATIC = Path(__file__).parent / "static"
-signer = URLSafeTimedSerializer(SECRET, salt="monitor-session")
+signer = URLSafeTimedSerializer(SECRET, salt="monitor-session")  # pre-rename salt, kept for existing sessions
 jf = httpx.AsyncClient(base_url=JF_URL, headers={"Authorization": f'MediaBrowser Token="{JF_KEY}"'}, timeout=20)
 http = httpx.AsyncClient(timeout=10)
 cpu_state = {"pct": None}
@@ -241,7 +246,7 @@ class Login(BaseModel):
 
 @app.post("/api/login")
 async def login(body: Login, request: Request, response: Response):
-    auth = ('MediaBrowser Client="Monitor", Device="Web", DeviceId="monitor-web", Version="1.0"')
+    auth = ('MediaBrowser Client="Monitarr", Device="Web", DeviceId="monitarr-web", Version="1.0"')
     async with httpx.AsyncClient(base_url=JF_URL, timeout=20) as c:
         r = await c.post("/Users/AuthenticateByName", headers={"Authorization": auth},
                          json={"Username": body.username, "Pw": body.password})

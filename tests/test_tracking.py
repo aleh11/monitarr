@@ -7,7 +7,7 @@ import tracking
 
 @pytest.fixture
 def database(tmp_path):
-    path = str(tmp_path / "monitor.db")
+    path = str(tmp_path / "monitarr.db")
     tracking.initialize(path, stamp("2026-10-01T00:00:00Z"))
     return path
 
