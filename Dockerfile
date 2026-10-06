@@ -1,4 +1,5 @@
-FROM node:22-alpine AS frontend
+# Static assets are architecture-independent: build them natively, not under emulation
+FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend
 WORKDIR /ui
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
