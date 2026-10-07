@@ -807,6 +807,7 @@ export function HistoryPage({
   const [source, setSource] = useState("measured");
   const [search, setSearch] = useState("");
   const measured = useResource<Activity[]>(`/api/activity?${query}`, 30000);
+  const finished = finishedSessions(measured.data ?? []);
   return (
     <>
       <PageIntro
@@ -884,12 +885,12 @@ export function HistoryPage({
                         <TableCell>
                           <Badge
                             variant={
-                              r.completed || (r.progress ?? 0) >= 1
+                              r.completed || finished.has(r.id)
                                 ? "default"
                                 : "secondary"
                             }
                           >
-                            {r.completed || (r.progress ?? 0) >= 1
+                            {r.completed || finished.has(r.id)
                               ? "Completed"
                               : r.progress != null
                                 ? `${Math.min(99, Math.max(1, Math.round(r.progress * 100)))}% watched`
@@ -916,6 +917,18 @@ export function HistoryPage({
       )}
     </>
   );
+}
+/** Sessions of one episode add up per viewer: the one that takes the total to 100% (and any after it) counts as completed. */
+function finishedSessions(rows: Activity[]) {
+  const total = new Map<string, number>();
+  const done = new Set<string>();
+  for (const r of [...rows].sort((a, b) => a.started_at.localeCompare(b.started_at))) {
+    const key = `${r.user_id}:${r.item_id}`;
+    const sum = (total.get(key) ?? 0) + (r.progress ?? 0);
+    total.set(key, sum);
+    if (sum >= 1) done.add(r.id);
+  }
+  return done;
 }
 function sessionSpan(start: string, end: string, timeZone: string) {
   const time = { hour: "2-digit", minute: "2-digit", hourCycle: "h23" } as const;
