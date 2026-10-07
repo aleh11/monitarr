@@ -883,12 +883,16 @@ export function HistoryPage({
                         <TableCell>{duration(r.seconds)}</TableCell>
                         <TableCell>
                           <Badge
-                            variant={r.completed ? "default" : "secondary"}
+                            variant={
+                              r.completed || (r.progress ?? 0) >= 1
+                                ? "default"
+                                : "secondary"
+                            }
                           >
-                            {r.completed
+                            {r.completed || (r.progress ?? 0) >= 1
                               ? "Completed"
                               : r.progress != null
-                                ? `${Math.max(1, Math.round(r.progress * 100))}% watched`
+                                ? `${Math.min(99, Math.max(1, Math.round(r.progress * 100)))}% watched`
                                 : "Partial watch"}
                           </Badge>
                         </TableCell>
