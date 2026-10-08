@@ -893,7 +893,7 @@ export function HistoryPage({
                             {r.completed || finished.has(r.id)
                               ? "Completed"
                               : r.progress != null
-                                ? `${Math.min(99, Math.max(1, Math.round(r.progress * 100)))}% watched`
+                                ? `${Math.max(1, Math.round(r.progress * 100))}% watched`
                                 : "Partial watch"}
                           </Badge>
                         </TableCell>
@@ -918,7 +918,8 @@ export function HistoryPage({
     </>
   );
 }
-/** Sessions of one episode add up per viewer: the one that takes the total to 100% (and any after it) counts as completed. */
+const COMPLETED_AT = 0.85;
+/** Sessions of one episode add up per viewer: the one that takes the total to 85% (and any after it) counts as completed. */
 function finishedSessions(rows: Activity[]) {
   const total = new Map<string, number>();
   const done = new Set<string>();
@@ -926,7 +927,7 @@ function finishedSessions(rows: Activity[]) {
     const key = `${r.user_id}:${r.item_id}`;
     const sum = (total.get(key) ?? 0) + (r.progress ?? 0);
     total.set(key, sum);
-    if (sum >= 1) done.add(r.id);
+    if (sum >= COMPLETED_AT) done.add(r.id);
   }
   return done;
 }
