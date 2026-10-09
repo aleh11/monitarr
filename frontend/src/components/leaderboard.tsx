@@ -92,8 +92,15 @@ export function Leaderboard({ data }: { data: Analytics }) {
     (a, b) => b[metric] - a[metric] || a.user_name.localeCompare(b.user_name),
   );
   const selectedViewer = data.users.find((u) => u.user_id === viewer);
+  const seriesUsers = selectedViewer ? [selectedViewer] : data.users;
+  const seriesKey = (userId: string) => `viewer_${userId.replace(/\W/g, "")}`;
+  const colorFor = (userId: string) =>
+    colors[data.users.findIndex((u) => u.user_id === userId) % 5];
   const chartData = data.daily.map((day) => ({
     ...day,
+    ...Object.fromEntries(
+      seriesUsers.map((u) => [seriesKey(u.user_id), day.users[u.user_id] || 0]),
+    ),
     watchSeconds: selectedViewer ? day.users[viewer] || 0 : day.seconds,
   }));
   const tickStep = Math.max(
@@ -101,9 +108,12 @@ export function Leaderboard({ data }: { data: Analytics }) {
     Math.ceil(Math.max(0, ...chartData.map((day) => day.watchSeconds)) / 240) * 60,
   );
   const timeTicks = Array.from({ length: 5 }, (_, index) => index * tickStep);
-  const config = {
-    watchSeconds: { label: "Watch time", color: "var(--chart-1)" },
-  } satisfies ChartConfig;
+  const config: ChartConfig = Object.fromEntries(
+    seriesUsers.map((u) => [
+      seriesKey(u.user_id),
+      { label: u.user_name, color: colorFor(u.user_id) },
+    ]),
+  );
   const breakdown = [
     { type: "Episode", seconds: data.breakdown.Episode, fill: colors[0] },
     { type: "Movie", seconds: data.breakdown.Movie, fill: colors[1] },
@@ -197,9 +207,13 @@ export function Leaderboard({ data }: { data: Analytics }) {
             )}
           </strong>
           <span>of actual watch time</span>
-          <span className="chart-key">
-            <i />
-            Watch time
+          <span className="chart-keys">
+            {seriesUsers.map((u) => (
+              <span className="chart-key" key={u.user_id}>
+                <i style={{ background: colorFor(u.user_id) }} />
+                {u.user_name}
+              </span>
+            ))}
           </span>
         </div>
         <ChartContainer config={config} className="daily-chart">
@@ -209,18 +223,27 @@ export function Leaderboard({ data }: { data: Analytics }) {
             accessibilityLayer
           >
             <defs>
-              <linearGradient id="watch-fill" x1="0" y1="0" x2="0" y2="1">
-                <stop
-                  offset="0%"
-                  stopColor="var(--chart-1)"
-                  stopOpacity={0.35}
-                />
-                <stop
-                  offset="100%"
-                  stopColor="var(--chart-1)"
-                  stopOpacity={0.01}
-                />
-              </linearGradient>
+              {seriesUsers.map((u) => (
+                <linearGradient
+                  key={u.user_id}
+                  id={`watch-fill-${seriesKey(u.user_id)}`}
+                  x1="0"
+                  y1="0"
+                  x2="0"
+                  y2="1"
+                >
+                  <stop
+                    offset="0%"
+                    stopColor={colorFor(u.user_id)}
+                    stopOpacity={0.35}
+                  />
+                  <stop
+                    offset="100%"
+                    stopColor={colorFor(u.user_id)}
+                    stopOpacity={0.01}
+                  />
+                </linearGradient>
+              ))}
             </defs>
             <CartesianGrid
               vertical={false}
@@ -257,14 +280,19 @@ export function Leaderboard({ data }: { data: Analytics }) {
                 />
               }
             />
-            <Area
-              type="monotone"
-              dataKey="watchSeconds"
-              stroke="var(--chart-1)"
-              strokeWidth={2.5}
-              fill="url(#watch-fill)"
-              isAnimationActive={false}
-            />
+            {seriesUsers.map((u) => (
+              <Area
+                key={u.user_id}
+                type="monotone"
+                dataKey={seriesKey(u.user_id)}
+                name={u.user_name}
+                stackId="watch"
+                stroke={colorFor(u.user_id)}
+                strokeWidth={2.5}
+                fill={`url(#watch-fill-${seriesKey(u.user_id)})`}
+                isAnimationActive={false}
+              />
+            ))}
           </AreaChart>
         </ChartContainer>
       </section>
