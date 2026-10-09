@@ -973,6 +973,17 @@ h2 {
   align-items: center;
   gap: 7px;
 }
+.chart-keys {
+  margin-left: auto;
+  align-self: center;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 14px;
+}
+.chart-keys .chart-key {
+  margin-left: 0;
+}
 .chart-key i {
   width: 6px;
   height: 6px;
