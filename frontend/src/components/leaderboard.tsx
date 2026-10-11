@@ -286,10 +286,13 @@ export function Leaderboard({ data }: { data: Analytics }) {
                 type="monotone"
                 dataKey={seriesKey(u.user_id)}
                 name={u.user_name}
-                stackId="watch"
                 stroke={colorFor(u.user_id)}
                 strokeWidth={2.5}
-                fill={`url(#watch-fill-${seriesKey(u.user_id)})`}
+                fill={
+                  selectedViewer
+                    ? `url(#watch-fill-${seriesKey(u.user_id)})`
+                    : "none"
+                }
                 isAnimationActive={false}
               />
             ))}
